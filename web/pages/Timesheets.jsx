@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Check, Trash2 } from 'lucide-react';
 import { api, qs } from '../api.js';
-import { money, date, time, hours, ymd, toLocalInput, fromLocalInput } from '../format.js';
-import { useLoad, useAction, Loading, Empty, Field, Modal, Tabs, Seg, useApp, isOffice, Avatar } from '../components/ui.jsx';
+import { money, date, time, hours, ymd, toLocalInput, fromLocalInput, IS_DEMO } from '../format.js';
+import { useLoad, useAction, Loading, Empty, Field, Modal, Tabs, Seg, useApp, isOffice, Avatar, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
@@ -21,7 +21,7 @@ function EntryModal({ entry, onClose, onSaved }) {
   }, 'Time saved').then(onSaved).catch(() => {});
   return (
     <Modal title={entry ? 'Edit time entry' : 'Add time'} onClose={onClose} footer={<>
-      {entry && <button className="btn danger" style={{ marginRight: 'auto' }} onClick={() => confirm('Delete this entry?') && run(() => api.del(`/timesheets/${entry.id}`), 'Deleted').then(onSaved).catch(() => {})}><Trash2 size={15} /> Delete</button>}
+      {entry && <button className="btn danger" style={{ marginRight: 'auto' }} onClick={() => askConfirm('Delete this entry?').then((ok) => ok && run(() => api.del(`/timesheets/${entry.id}`), 'Deleted').then(onSaved).catch(() => {}))}><Trash2 size={15} /> Delete</button>}
       <button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Save</button></>}>
       <div className="form-grid">
         {office && !entry && <Field label="Team member" full><select value={f.user_id} onChange={set('user_id')}>{(team || []).filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>}
@@ -135,11 +135,11 @@ function Payroll() {
             </tbody>
           </table></div>
           <div className="card-pad small muted">Hourly cost is set per team member in Settings → Team. Pending hours must be approved before they count toward pay.
-            <button className="btn sm" style={{ marginLeft: 10 }} onClick={() => run(async () => {
+            {!IS_DEMO && <button className="btn sm" style={{ marginLeft: 10 }} onClick={() => run(async () => {
               const rows = [['Team member', 'Approved hours', 'Pending hours', 'Hourly cost', 'Gross', 'Reimbursements'], ...data.rows.map((r) => [r.name, r.approved_hours.toFixed(2), r.pending_hours.toFixed(2), r.hourly_cost, r.gross, r.reimbursements])];
               const blob = new Blob([rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')], { type: 'text/csv' });
               const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `payroll-${data.from}-to-${data.to}.csv`; a.click();
-            })}>Export CSV</button></div>
+            })}>Export CSV</button>}</div>
         </div>
       )}
     </div>

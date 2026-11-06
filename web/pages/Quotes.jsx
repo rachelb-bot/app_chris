@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { FileText, Plus, MoreHorizontal, Pencil, Trash2, Copy, Send, Printer, Wrench, CheckCircle2, Link2, Search, LayoutTemplate, Archive } from 'lucide-react';
 import { api, qs } from '../api.js';
-import { money, date, dateTime } from '../format.js';
+import { money, date, dateTime, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useToast, useApp } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient } from '../components/shared.jsx';
@@ -204,8 +204,8 @@ export function QuoteDetail() {
           {q.status !== 'approved' && q.status !== 'converted' && <button onClick={() => setStatus('approved', 'Marked approved')}><CheckCircle2 size={15} /> Mark as approved</button>}
           {q.status === 'draft' && <button onClick={() => setStatus('sent', 'Marked sent')}><Send size={15} /> Mark as sent</button>}
           <button onClick={() => { if (q.status === 'draft') return toast('Send the quote first to activate the client link', 'error'); navigator.clipboard?.writeText(link); toast('Client link copied'); }}><Link2 size={15} /> Copy client link</button>
-          <button onClick={() => window.open(link, '_blank')} disabled={q.status === 'draft'}><FileText size={15} /> View as client</button>
-          <button onClick={() => window.print()}><Printer size={15} /> Print / PDF</button>
+          <button onClick={() => (IS_DEMO ? nav(`/hub/quote/${q.public_token}`) : window.open(link, '_blank'))} disabled={q.status === 'draft'}><FileText size={15} /> View as client</button>
+          {!IS_DEMO && <button onClick={() => window.print()}><Printer size={15} /> Print / PDF</button>}
           <button onClick={() => run(() => api.post(`/quotes/${q.id}/duplicate`), 'Quote duplicated').then((r) => nav(`/quotes/${r.id}`)).catch(() => {})}><Copy size={15} /> Duplicate</button>
           {q.status !== 'archived' && <button onClick={() => setStatus('archived', 'Archived')}><Archive size={15} /> Archive</button>}
           <button className="danger" onClick={() => setDel(true)}><Trash2 size={15} /> Delete</button>

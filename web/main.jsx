@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, MemoryRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import './styles.css';
 import { api } from './api.js';
-import { configureFormat } from './format.js';
+import { configureFormat, IS_DEMO } from './format.js';
 import { AppCtx, ToastProvider, Loading, isOffice } from './components/ui.jsx';
 import Layout from './components/Layout.jsx';
 import { Login, Setup } from './pages/Auth.jsx';
@@ -94,12 +94,15 @@ function AppRoutes() {
   );
 }
 
+// The browser preview runs inside an embedded page, so it keeps routes in memory instead of the URL.
+const Router = IS_DEMO ? MemoryRouter : BrowserRouter;
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <Router>
       <ToastProvider>
         <AppRoutes />
       </ToastProvider>
-    </BrowserRouter>
+    </Router>
   </React.StrictMode>,
 );

@@ -1,3 +1,6 @@
+/** True in the self-contained browser preview build (VITE_DEMO=1). */
+export const IS_DEMO = !!import.meta.env.VITE_DEMO;
+
 let cfg = { currency: 'EUR', locale: 'en-IE' };
 export function configureFormat(s) { if (s) cfg = { currency: s.currency || 'EUR', locale: s.locale || 'en-IE' }; }
 

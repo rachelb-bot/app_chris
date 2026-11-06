@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { api } from '../api.js';
+import { IS_DEMO } from '../format.js';
 import { Field, useAction } from '../components/ui.jsx';
 import { BrandMark } from '../components/Layout.jsx';
 
 export function Login({ onDone, companyName }) {
-  const [f, setF] = useState({ email: '', password: '' });
+  const [f, setF] = useState(IS_DEMO ? { email: 'demo@voltline.app', password: 'demo1234' } : { email: '', password: '' });
   const [run, busy] = useAction();
   const submit = (e) => { e.preventDefault(); run(() => api.post('/auth/login', f)).then(onDone).catch(() => {}); };
   return (
@@ -17,6 +18,14 @@ export function Login({ onDone, companyName }) {
           <Field label="Password"><input type="password" autoComplete="current-password" required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
           <button className="btn primary block" disabled={busy}>Sign in</button>
         </div>
+        {IS_DEMO && (
+          <div className="notice blue mt small">
+            <b>Preview logins</b> (password <b>demo1234</b> for all):<br />
+            demo@voltline.app — owner, sees everything<br />
+            aoife@brightspark.example — office<br />
+            liam@brightspark.example — electrician
+          </div>
+        )}
         <p className="small muted mt">Forgotten your password? Ask your account owner to reset it in Settings → Team.</p>
       </form>
     </div>

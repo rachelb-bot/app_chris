@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, GripVertical, Search, FileText, Paperclip, X, Type } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { money, ago, date } from '../format.js';
-import { useLoad, useAction, Field, Modal, useDebounced, useApp } from './ui.jsx';
+import { useLoad, useAction, Field, Modal, useDebounced, useApp, askConfirm } from './ui.jsx';
 
 // ===================== totals =====================
 export function computeTotals(items, { discount = 0, tax_rate = 0 } = {}) {
@@ -251,7 +251,7 @@ export function Attachments({ type, id, title = 'Files & photos' }) {
               <div className="file" key={a.id}>
                 <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer">{a.mime?.startsWith('image/') ? <img src={`/api/files/${a.id}`} alt={a.filename} /> : <div className="ph"><FileText size={28} /></div>}</a>
                 <div className="nm" title={a.filename}>{a.filename}</div>
-                <button className="x" aria-label="Delete file" onClick={() => confirm(`Delete ${a.filename}?`) && run(() => api.del(`/attachments/${a.id}`)).then(reload).catch(() => {})}><X size={13} /></button>
+                <button className="x" aria-label="Delete file" onClick={() => askConfirm(`Delete ${a.filename}?`).then((ok) => ok && run(() => api.del(`/attachments/${a.id}`)).then(reload).catch(() => {}))}><X size={13} /></button>
               </div>
             ))}
           </div>

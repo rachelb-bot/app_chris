@@ -9,6 +9,25 @@ export const useApp = () => useContext(AppCtx);
 export const isOffice = (u) => ['owner', 'admin', 'office'].includes(u?.role);
 export const isAdmin = (u) => ['owner', 'admin'].includes(u?.role);
 
+// ---------- in-app confirm (replaces window.confirm, which embedded browsers can block) ----------
+let confirmHost = null;
+/** Ask the user to confirm. Resolves true/false. */
+export function askConfirm(message, { confirmLabel = 'Confirm', danger = true } = {}) {
+  return new Promise((resolve) => (confirmHost ? confirmHost({ message, confirmLabel, danger, resolve }) : resolve(window.confirm(message))));
+}
+function ConfirmHost() {
+  const [q, setQ] = useState(null);
+  useEffect(() => { confirmHost = setQ; return () => { confirmHost = null; }; }, []);
+  if (!q) return null;
+  const done = (v) => { q.resolve(v); setQ(null); };
+  return (
+    <Modal title="Are you sure?" onClose={() => done(false)} footer={<>
+      <button className="btn" onClick={() => done(false)}>Cancel</button>
+      <button className={`btn ${q.danger ? 'danger solid' : 'primary'}`} autoFocus onClick={() => done(true)}>{q.confirmLabel}</button>
+    </>}><p>{q.message}</p></Modal>
+  );
+}
+
 // ---------- toasts ----------
 const ToastCtx = createContext(() => {});
 export const useToast = () => useContext(ToastCtx);
@@ -22,6 +41,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
+      <ConfirmHost />
       <div className="toasts" role="status">{toasts.map((t) => <div key={t.id} className={`toast ${t.type}`}>{t.msg}</div>)}</div>
     </ToastCtx.Provider>
   );

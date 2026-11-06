@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Receipt, Plus, MoreHorizontal, Pencil, Trash2, Send, Printer, Link2, Search, Ban, Banknote, X, FileText } from 'lucide-react';
 import { api, qs } from '../api.js';
-import { money, date, ymd } from '../format.js';
-import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useToast, useApp, isAdmin } from '../components/ui.jsx';
+import { money, date, ymd, IS_DEMO } from '../format.js';
+import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useToast, useApp, isAdmin, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient } from '../components/shared.jsx';
 import { SendModal, DocHeader } from './Quotes.jsx';
@@ -148,11 +148,11 @@ export function InvoiceDetail() {
         <Dropdown className="btn icon" label={<MoreHorizontal size={18} />}>
           {inv.status !== 'draft' && inv.status !== 'void' && <button onClick={() => setParams({ send: '1' })}><Send size={15} /> Resend / reminder</button>}
           <button onClick={() => { if (inv.status === 'draft') return toast('Send the invoice first to activate the client link', 'error'); navigator.clipboard?.writeText(link); toast('Client link copied'); }}><Link2 size={15} /> Copy client link</button>
-          <button disabled={inv.status === 'draft'} onClick={() => window.open(link, '_blank')}><FileText size={15} /> View as client</button>
-          <button onClick={() => window.print()}><Printer size={15} /> Print / PDF</button>
+          <button disabled={inv.status === 'draft'} onClick={() => (IS_DEMO ? nav(`/hub/invoice/${inv.public_token}`) : window.open(link, '_blank'))}><FileText size={15} /> View as client</button>
+          {!IS_DEMO && <button onClick={() => window.print()}><Printer size={15} /> Print / PDF</button>}
           {inv.status === 'draft' && <button onClick={() => act(() => api.put(`/invoices/${inv.id}`, { status: 'sent' }), 'Marked as sent')}><Send size={15} /> Mark as sent</button>}
           {inv.status !== 'void' && inv.status !== 'paid' && <button onClick={() => act(() => api.put(`/invoices/${inv.id}`, { status: 'paid' }), 'Marked as paid')}><Banknote size={15} /> Mark as paid</button>}
-          {inv.status !== 'void' && <button className="danger" onClick={() => confirm('Void this invoice? It will no longer count as owed.') && act(() => api.put(`/invoices/${inv.id}`, { status: 'void' }), 'Invoice voided')}><Ban size={15} /> Void</button>}
+          {inv.status !== 'void' && <button className="danger" onClick={() => askConfirm('Void this invoice? It will no longer count as owed.').then((ok) => ok && act(() => api.put(`/invoices/${inv.id}`, { status: 'void' }), 'Invoice voided'))}><Ban size={15} /> Void</button>}
           {inv.status === 'draft' && isAdmin(user) && <button className="danger" onClick={() => setDel(true)}><Trash2 size={15} /> Delete</button>}
         </Dropdown>
       </PageHead>
@@ -177,7 +177,7 @@ export function InvoiceDetail() {
             <ul className="list-plain" style={{ padding: '0 20px' }}>
               {inv.payments.map((p) => (
                 <li key={p.id} className="row"><div style={{ flex: 1 }}><b>{money(p.amount)}</b><div className="small muted">{date(p.paid_on)} · {p.method.replace('_', ' ')}{p.reference ? ` · ${p.reference}` : ''}</div></div>
-                  <button className="btn ghost icon sm" aria-label="Delete payment" onClick={() => confirm('Delete this payment?') && act(() => api.del(`/payments/${p.id}`), 'Payment removed')}><X size={14} /></button></li>
+                  <button className="btn ghost icon sm" aria-label="Delete payment" onClick={() => askConfirm('Delete this payment?').then((ok) => ok && act(() => api.del(`/payments/${p.id}`), 'Payment removed'))}><X size={14} /></button></li>
               ))}
               {!inv.payments.length && <li className="muted">No payments yet.</li>}
             </ul>

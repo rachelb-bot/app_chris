@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Wrench, Plus, MoreHorizontal, Pencil, Trash2, Archive, Receipt, CheckCircle2, Search, CalendarPlus, Circle, RotateCcw, X } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { money, date, time, dateTime, toLocalInput, fromLocalInput, hours, ymd } from '../format.js';
-import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useApp, isOffice, isAdmin, Avatars, Avatar } from '../components/ui.jsx';
+import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useApp, isOffice, isAdmin, Avatars, Avatar, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient } from '../components/shared.jsx';
 
@@ -264,7 +264,7 @@ export function JobDetail() {
                       <div className="mt-s"><Avatars users={v.assignees} /></div>
                     </div>
                     {office && <button className="btn sm ghost" onClick={() => setVisit(v)}>Edit</button>}
-                    {office && <button className="btn sm ghost" aria-label="Delete visit" onClick={() => confirm('Delete this visit?') && act(() => api.del(`/visits/${v.id}`), 'Visit deleted')}><Trash2 size={14} /></button>}
+                    {office && <button className="btn sm ghost" aria-label="Delete visit" onClick={() => askConfirm('Delete this visit?').then((ok) => ok && act(() => api.del(`/visits/${v.id}`), 'Visit deleted'))}><Trash2 size={14} /></button>}
                   </li>
                 );
               })}

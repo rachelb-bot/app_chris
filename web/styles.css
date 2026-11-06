@@ -311,3 +311,8 @@ a.stat { text-decoration: none; display: block; } a.stat:hover { border-color: v
   .hide-sm { display: none; }
   .hbar { grid-template-columns: 100px 1fr 40px; }
 }
+
+/* ---------- browser preview only ---------- */
+.boot { min-height: 60vh; display: grid; place-items: center; color: var(--muted); font-weight: 600; }
+.preview-pill { position: fixed; z-index: 150; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 10px; background: var(--ink); color: #fff; font-size: 12px; padding: 6px 6px 6px 12px; border-radius: 99px; box-shadow: var(--shadow-lg); }
+.preview-pill button { border: 0; border-radius: 99px; padding: 4px 10px; font-weight: 700; font-size: 12px; background: var(--amber); color: var(--ink); cursor: pointer; }

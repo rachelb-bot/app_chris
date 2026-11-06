@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { CheckCircle2, Printer } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { CheckCircle2, Printer, ArrowLeft } from 'lucide-react';
 import { api } from '../api.js';
-import { money, date, configureFormat } from '../format.js';
+import { money, date, configureFormat, IS_DEMO } from '../format.js';
 import { Loading, Field, Status, useAction } from '../components/ui.jsx';
 import { BrandMark } from '../components/Layout.jsx';
 
@@ -14,12 +14,14 @@ function useHub(url) {
 }
 
 function HubShell({ company, children }) {
+  const nav = useNavigate();
   return (
     <div style={{ minHeight: '100%', background: 'var(--bg)' }}>
       <div className="hub">
         <div className="hub-top">
           <div className="row"><BrandMark /><div><div className="strong" style={{ fontSize: 17 }}>{company?.name}</div><div className="small muted">{[company?.phone, company?.email].filter(Boolean).join(' · ')}</div></div></div>
-          <button className="btn no-print" onClick={() => window.print()}><Printer size={15} /> Print / Save PDF</button>
+          {IS_DEMO ? <button className="btn" onClick={() => nav(-1)}><ArrowLeft size={15} /> Back to Voltline</button>
+            : <button className="btn no-print" onClick={() => window.print()}><Printer size={15} /> Print / Save PDF</button>}
         </div>
         {children}
         <p className="small faint mt" style={{ textAlign: 'center' }}>{[company?.address, company?.reg_no && `Reg. ${company.reg_no}`, company?.vat_no && `${company.tax_label || 'VAT'} ${company.vat_no}`].filter(Boolean).join(' · ')}</p>

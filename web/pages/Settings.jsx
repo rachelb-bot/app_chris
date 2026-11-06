@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Plus, Download, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../api.js';
-import { money, date, dateTime } from '../format.js';
-import { useLoad, useAction, Loading, Field, Modal, Tabs, useApp, isAdmin, isOffice, Avatar, Empty } from '../components/ui.jsx';
+import { money, date, dateTime, IS_DEMO } from '../format.js';
+import { useLoad, useAction, Loading, Field, Modal, Tabs, useApp, isAdmin, isOffice, Avatar, Empty, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { LineItemsEditor } from '../components/shared.jsx';
 
@@ -147,7 +147,7 @@ function Templates() {
         {data.map((t) => (
           <li key={t.id} className="row"><div style={{ flex: 1 }}><b>{t.name}</b><div className="small muted">{t.items.length} items</div></div>
             <button className="btn sm" onClick={() => setEdit(t)}><Pencil size={13} /> Edit</button>
-            <button className="btn sm ghost" aria-label="Delete" onClick={() => confirm('Delete template?') && run(() => api.del(`/quote-templates/${t.id}`)).then(reload)}><Trash2 size={13} /></button></li>
+            <button className="btn sm ghost" aria-label="Delete" onClick={() => askConfirm('Delete template?').then((ok) => ok && run(() => api.del(`/quote-templates/${t.id}`)).then(reload))}><Trash2 size={13} /></button></li>
         ))}
         {!data.length && <li className="muted">No templates.</li>}
       </ul>
@@ -189,7 +189,7 @@ function Data() {
       <div className="card card-pad">
         <h3>Backup & export</h3>
         <p className="muted mt-s mb">Download every record (clients, quotes, jobs, invoices, payments, time, expenses…) as one JSON file. The live database is a single SQLite file in the server's data folder — back that folder up too.</p>
-        <a className="btn" href="/api/export"><Download size={15} /> Export all data</a>
+        {IS_DEMO ? <p className="small muted">Export is switched off in this preview.</p> : <a className="btn" href="/api/export"><Download size={15} /> Export all data</a>}
       </div>
       <div className="card">
         <div className="card-head"><h3>Email outbox</h3><span className="small muted">Every email sent to clients</span></div>

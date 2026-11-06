@@ -75,6 +75,14 @@ docker compose up -d --build
 
 Put it behind HTTPS (your host normally does this). Sessions use secure cookies in production; set `COOKIE_SECURE=false` only when serving over plain HTTP on a private network.
 
+### Browser preview (no server)
+
+```bash
+npm run build:preview
+```
+
+This builds `preview/voltline-preview.html`, one self-contained page where the API and database run inside the browser with the sample company. Changes are saved in that browser only. It's useful for sharing a clickable demo (for example as a claude.ai artifact). File uploads, emails, printing and exports are switched off in this mode.
+
 ### Vercel (preview only)
 
 The repo includes `vercel.json` and `api/index.js`, so you can import it into Vercel as-is. Set a `SESSION_SECRET` environment variable (any long random string).

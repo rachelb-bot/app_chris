@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Megaphone, Plus, Send, Trash2, Gift, Link2, Star } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { money, date, dateTime } from '../format.js';
-import { useLoad, useAction, Loading, Empty, Field, Modal, Tabs, Status, useApp, useToast } from '../components/ui.jsx';
+import { useLoad, useAction, Loading, Empty, Field, Modal, Tabs, Status, useApp, useToast, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { HBars } from '../components/shared.jsx';
 
@@ -55,8 +55,8 @@ function Campaigns() {
                 <td className="right">
                   {c.status === 'draft' && (<div className="btn-group" style={{ justifyContent: 'flex-end' }}>
                     <button className="btn sm" onClick={() => setEdit(c)}>Edit</button>
-                    <button className="btn sm primary" onClick={() => confirm(`Send "${c.name}" now?`) && run(() => api.post(`/campaigns/${c.id}/send`)).then((r) => { toast(`Sent to ${r.recipients - r.failed} clients`); reload(); }).catch(() => {})}><Send size={13} /> Send</button>
-                    <button className="btn sm ghost" aria-label="Delete" onClick={() => confirm('Delete campaign?') && run(() => api.del(`/campaigns/${c.id}`)).then(reload)}><Trash2 size={13} /></button>
+                    <button className="btn sm primary" onClick={() => askConfirm(`Send "${c.name}" now?`).then((ok) => ok && run(() => api.post(`/campaigns/${c.id}/send`)).then((r) => { toast(`Sent to ${r.recipients - r.failed} clients`); reload(); }).catch(() => {}))}><Send size={13} /> Send</button>
+                    <button className="btn sm ghost" aria-label="Delete" onClick={() => askConfirm('Delete campaign?').then((ok) => ok && run(() => api.del(`/campaigns/${c.id}`)).then(reload))}><Trash2 size={13} /></button>
                   </div>)}
                 </td>
               </tr>))}
