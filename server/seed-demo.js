@@ -4,16 +4,14 @@ import { insert, replaceLineItems, token, addDays, today } from './lib.js';
 import { hashPassword } from './auth.js';
 import { seedDefaults, DEFAULT_PRODUCTS } from './seed-defaults.js';
 
-migrate();
-if (db.prepare('SELECT COUNT(*) c FROM clients').get().c > 0 && !process.argv.includes('--force')) {
-  console.log('Database already has clients — not seeding demo data. Use --force to add anyway.');
-  process.exit(0);
-}
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const iso = (d, h = 9, m = 0) => { const x = new Date(d + 'T00:00:00'); x.setHours(h, m, 0, 0); return x.toISOString(); };
 const dt = (daysAgo) => new Date(Date.now() - daysAgo * 864e5).toISOString().replace('T', ' ').slice(0, 19);
 const P = (name, qty = 1, extra = {}) => { const p = DEFAULT_PRODUCTS.find((x) => x[0] === name); return { name: p[0], description: p[1], quantity: qty, unit_price: p[3], unit_cost: p[4], ...extra }; };
 
+export function seedDemo() {
 db.transaction(() => {
   let owner = db.prepare("SELECT * FROM users WHERE role = 'owner'").get();
   if (!owner) {
@@ -128,5 +126,15 @@ db.transaction(() => {
   insert('campaigns', { name: 'Autumn EICR reminder', subject: 'Is your home electrically safe this winter?', body: 'Hi {first_name},\n\nWinter is the busiest time for electrical faults. Book a periodic inspection now and get 10% off.\n\nKind regards,\n{company}', audience: 'active' });
   for (const j of [j1, j2, j3, j5, j6]) logActivity({ userId: aoife, entityType: 'job', entityId: j, clientId: db.prepare('SELECT client_id FROM jobs WHERE id = ?').get(j).client_id, action: 'created', summary: `Job #${db.prepare('SELECT number FROM jobs WHERE id = ?').get(j).number} created` });
 })();
+}
 
-console.log('Demo data added. Sign in with demo@voltline.app / demo1234 (team members use their email + demo1234).');
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  migrate();
+  if (db.prepare('SELECT COUNT(*) c FROM clients').get().c > 0 && !process.argv.includes('--force')) {
+    console.log('Database already has clients — not seeding demo data. Use --force to add anyway.');
+    process.exit(0);
+  }
+  seedDemo();
+  console.log('Demo data added. Sign in with demo@voltline.app / demo1234 (team members use their email + demo1234).');
+}

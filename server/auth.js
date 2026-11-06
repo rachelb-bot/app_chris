@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
-import { db } from './db.js';
-import { HttpError, token } from './lib.js';
+import crypto from 'node:crypto';
+import { db, sessionSecret } from './db.js';
+import { HttpError } from './lib.js';
 
 const SESSION_DAYS = 30;
 export const COOKIE = 'vl_session';
@@ -11,19 +12,29 @@ export function hashPassword(pw) {
 }
 export const checkPassword = (pw, hash) => bcrypt.compareSync(String(pw || ''), hash);
 
+const sign = (payload) => crypto.createHmac('sha256', sessionSecret()).update(payload).digest('base64url');
+
+/** Session = signed cookie "userId.expiryMs.signature" — no server-side state, so it works on multiple instances. */
 export function createSession(res, userId) {
-  const t = token(32);
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
-  db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)').run(t, userId, expires.toISOString());
-  res.cookie(COOKIE, t, {
+  const payload = `${userId}.${expires.getTime()}`;
+  res.cookie(COOKIE, `${payload}.${sign(payload)}`, {
     httpOnly: true, sameSite: 'lax', expires,
     secure: process.env.COOKIE_SECURE === 'true' || (process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false'),
   });
 }
 
+function readSession(value) {
+  const parts = String(value || '').split('.');
+  if (parts.length !== 3) return null;
+  const [uid, exp, sig] = parts;
+  const expected = sign(`${uid}.${exp}`);
+  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  if (Number(exp) < Date.now()) return null;
+  return Number(uid);
+}
+
 export function destroySession(req, res) {
-  const t = req.cookies?.[COOKIE];
-  if (t) db.prepare('DELETE FROM sessions WHERE token = ?').run(t);
   res.clearCookie(COOKIE);
 }
 
@@ -35,10 +46,9 @@ export function publicUser(u) {
 
 /** Attaches req.user when a valid session cookie is present. */
 export function loadUser(req, _res, next) {
-  const t = req.cookies?.[COOKIE];
-  if (t) {
-    const row = db.prepare(`SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token = ? AND s.expires_at > ? AND u.active = 1`).get(t, new Date().toISOString());
+  const uid = readSession(req.cookies?.[COOKIE]);
+  if (uid) {
+    const row = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(uid);
     if (row) req.user = publicUser(row);
   }
   next();

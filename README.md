@@ -75,10 +75,17 @@ docker compose up -d --build
 
 Put it behind HTTPS (your host normally does this). Sessions use secure cookies in production; set `COOKIE_SECURE=false` only when serving over plain HTTP on a private network.
 
+### Vercel (preview only)
+
+The repo includes `vercel.json` and `api/index.js`, so you can import it into Vercel as-is. Set a `SESSION_SECRET` environment variable (any long random string).
+
+Vercel has no persistent disk. On Vercel the database lives in temporary storage and is reloaded with the **demo company** whenever a new server instance starts. Changes you make there **will not last**. Use it to click around and share a preview, and use the Docker route above for real use.
+
 ### Configuration
 
 All settings are optional environment variables; see `.env.example`.
 
+- `SESSION_SECRET`: key for signing login cookies (generated and stored automatically if unset; **required** on Vercel/multi-instance hosts)
 - `DATA_DIR`: where `voltline.db` and `uploads/` live (default `./data`)
 - `PUBLIC_URL`: base URL used in links you email to clients
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`: outgoing email. Without them, emails are recorded in Settings → Data & email log and documents are still marked as sent, so you can copy the client link and send it yourself.

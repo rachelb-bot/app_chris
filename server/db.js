@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(process.cwd(), 'data'));
@@ -343,7 +344,7 @@ export const DEFAULT_SETTINGS = {
 export function getSettings() {
   const rows = db.prepare('SELECT key, value FROM settings').all();
   const s = { ...DEFAULT_SETTINGS };
-  for (const r of rows) s[r.key] = r.value;
+  for (const r of rows) if (!r.key.startsWith('_')) s[r.key] = r.value;
   return s;
 }
 
@@ -367,6 +368,16 @@ export function nextNumber(kind) {
     setSettings({ [key]: n + 1 });
     return n;
   })();
+}
+
+/** Secret for signing session cookies: SESSION_SECRET env, else generated once and stored. */
+export function sessionSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  const row = db.prepare("SELECT value FROM settings WHERE key = '_session_secret'").get();
+  if (row) return row.value;
+  const v = crypto.randomBytes(32).toString('hex');
+  db.prepare("INSERT INTO settings (key, value) VALUES ('_session_secret', ?)").run(v);
+  return v;
 }
 
 export function logActivity({ userId, entityType, entityId, clientId, action, summary }) {
