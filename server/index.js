@@ -13,6 +13,7 @@ import money from './routes/money.js';
 import insights from './routes/insights.js';
 import hub from './routes/hub.js';
 import pipeline, { backfillDeals } from './routes/pipeline.js';
+import imports from './routes/imports.js';
 
 migrate();
 backfillDeals();
@@ -36,7 +37,7 @@ app.get('/healthz', (_req, res) => {
 
 // Public client hub routes first (no login), then authenticated API.
 app.use('/api', hub);
-app.use('/api', loadUser, core, crm, work, money, insights, pipeline);
+app.use('/api', loadUser, core, crm, work, money, insights, pipeline, imports);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Serve the built web app (single-page app with client-side routing).

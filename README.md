@@ -8,17 +8,17 @@ The single operations platform and source of truth for an electrical contracting
 |---|---|
 | **Home** | Workflow overview (requests → quotes → jobs → invoices), today's appointments, receivables, upcoming jobs, revenue, recent activity, a getting-started checklist, notifications bell |
 | **Schedule** | Month / week / day calendar of visits and on-site assessments; Type, Team and Status filters; **Find a time** (next free slots by job length and electrician); month picker; drag to reschedule; unscheduled jobs; day route in Google Maps |
-| **Clients** | Leads & active clients, multiple properties, tags, lead source, billing history, activity, notes, files, merge duplicates, CSV import/export |
+| **Clients** | Leads & active clients, multiple properties (with map position), tags, lead source, custom fields, billing history, activity, notes, files, merge duplicates, CSV import/export |
 | **Requests** | Work enquiries, on-site assessment booking, convert to quote or job, plus a **public online booking form** (`/hub/book`) |
-| **Quotes** | Electrical quote templates (intro, line items, client message, contract/disclaimer), optional line items, client-view options (hide quantities/unit prices/line totals), deposit, margin, email to client, **online approval with signature**, convert to job, save as template |
-| **Jobs** | One-off & recurring jobs, visits with assigned electricians, on-site safety checklist, photos/certs, live **job costing** (materials, labour from timesheets, expenses) |
-| **Invoices** | From a job in one click or manually, VAT, discounts, send, client view link, partial payments, overdue tracking, void |
+| **Quotes** | Electrical quote templates (intro, line items, client message, contract/disclaimer), optional line items, client-view options (hide quantities/unit prices/line totals), deposit, margin, email to client, **online approval with signature**, convert to job, save as template, product photos on line items, payment schedule (deposit + stage payments), files shared with the client, import from CSV |
+| **Jobs** | One-off & recurring jobs, visits with assigned electricians, on-site safety checklist, photos/certs, live **job costing** (materials, labour from timesheets, expenses), payment schedule with one invoice per payment, import from CSV |
+| **Invoices** | From a job in one click or manually, VAT, discounts, send, client view link, partial payments, overdue tracking, void, import from CSV (including paid / part-paid history) |
 | **Expenses** | Receipts, link to job, reimbursable tracking, report by category / person / job / supplier |
 | **Timesheets** | Clock in/out from the top bar, manual entries, approval, payroll with paid/unpaid status and mark-as-paid, CSV |
 | **Marketing** | Lead-source performance (leads or revenue), email campaigns to client segments with ready-made ideas, referral tracking |
 | **Pipeline** | CRM sales pipeline: drag opportunities through New lead → Contacted → Assessment → Quote sent → Follow-up → Won / Lost. Deals are created and moved automatically from requests, quotes and approvals |
-| **Insights** | Leads, conversions, revenue (12 months), revenue by lead source and by area, payment methods, P&L per job (completed / active), cashflow, payment times, quote conversion rate and value, lead funnel |
-| **Settings** | Company & VAT details, bank details, numbering, team & roles, products/services catalogue, quote templates, data export, email log |
+| **Insights** | Leads, conversions, revenue (12 months), revenue by lead source and by area, payment methods, P&L per job (completed / active), cashflow, payment times, quote conversion rate and value, lead funnel, **revenue map** by property |
+| **Settings** | Company & VAT details, bank details, working hours, numbering, team & roles, products/services catalogue with photos, quote templates, **custom fields** for clients/requests/quotes/jobs/invoices, data export, email log |
 
 **Roles:** Owner / Admin (everything), Office (all client & money work), Electrician (their schedule, jobs, checklist, time and expenses only — no prices or financials). The server enforces these permissions, not just the menus.
 
@@ -94,6 +94,7 @@ Vercel has no persistent disk. On Vercel the database lives in temporary storage
 
 All settings are optional environment variables; see `.env.example`.
 
+- `GEOCODER`: address lookup for the revenue map. Defaults to OpenStreetMap Nominatim (free, 1 request/second); set `off` to disable or `GEOCODER_URL` for another Nominatim-compatible service. `GEOCODER_CONTACT` adds a contact email to requests, which Nominatim's usage policy asks for.
 - `SESSION_SECRET`: key for signing login cookies (generated and stored automatically if unset; **required** on Vercel/multi-instance hosts)
 - `DATA_DIR`: where `voltline.db` and `uploads/` live (default `./data`)
 - `PUBLIC_URL`: base URL used in links you email to clients

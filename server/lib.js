@@ -60,16 +60,25 @@ export function getLineItems(parentType, parentId) {
   return db.prepare('SELECT * FROM line_items WHERE parent_type = ? AND parent_id = ? ORDER BY sort, id').all(parentType, parentId);
 }
 
+/** Accepts only small inline images (data: URLs made by the browser's resize step). */
+export function cleanImage(v) {
+  if (!v) return null;
+  const str = String(v);
+  if (!/^data:image\/(png|jpe?g|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(str)) return null;
+  if (str.length > 600_000) throw new HttpError(413, 'That photo is too large. Use an image under 400KB.');
+  return str;
+}
+
 export function replaceLineItems(parentType, parentId, items = []) {
   db.prepare('DELETE FROM line_items WHERE parent_type = ? AND parent_id = ?').run(parentType, parentId);
   const stmt = db.prepare(`INSERT INTO line_items
-    (parent_type, parent_id, product_id, name, description, quantity, unit_price, unit_cost, optional, selected, is_text, sort)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+    (parent_type, parent_id, product_id, name, description, quantity, unit_price, unit_cost, optional, selected, is_text, sort, image)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   items.forEach((it, i) => {
     if (!it || !(it.name || '').trim()) return;
     stmt.run(parentType, parentId, it.product_id || null, String(it.name).trim(), it.description || null,
       Number(it.quantity ?? 1) || 0, round2(it.unit_price), round2(it.unit_cost),
-      it.optional ? 1 : 0, it.selected === false || it.selected === 0 ? 0 : 1, it.is_text ? 1 : 0, i);
+      it.optional ? 1 : 0, it.selected === false || it.selected === 0 ? 0 : 1, it.is_text ? 1 : 0, i, cleanImage(it.image));
   });
 }
 
@@ -109,6 +118,12 @@ export function invoiceDisplayStatus(inv, totals) {
 
 export function jobDisplayStatus(job) {
   if (job.status === 'archived') return 'archived';
+  const ms = db.prepare('SELECT due_date, invoice_id FROM payment_milestones WHERE parent_type = ? AND parent_id = ?').all('job', job.id);
+  if (ms.length) {
+    const open = ms.filter((m) => !m.invoice_id);
+    if (job.status === 'completed') return open.length ? 'requires_invoicing' : 'completed';
+    if (open.some((m) => m.due_date && m.due_date <= today())) return 'requires_invoicing';
+  }
   if (job.status === 'completed') {
     if (job.billing === 'none') return 'completed';
     const inv = db.prepare("SELECT COUNT(*) c FROM invoices WHERE job_id = ? AND status != 'void'").get(job.id).c;
@@ -124,4 +139,50 @@ export function jobDisplayStatus(job) {
   if (!v.total) return 'unscheduled';
   if (!v.upcoming) return 'action_required';
   return 'active';
+}
+
+// ---------------- payment schedules ----------------
+/** Net amount (before tax) a schedule is split over. */
+export function scheduleBase(parentType, parentId) {
+  if (parentType === 'quote') {
+    const q = db.prepare('SELECT * FROM quotes WHERE id = ?').get(parentId);
+    const t = computeTotals(getLineItems('quote', parentId), q || {});
+    return round2(t.subtotal - t.discount);
+  }
+  return computeTotals(getLineItems('job', parentId)).subtotal;
+}
+
+/** Milestones with their worked-out net amounts. A "remainder" milestone takes whatever is left. */
+export function getMilestones(parentType, parentId, base = scheduleBase(parentType, parentId)) {
+  const rows = db.prepare('SELECT * FROM payment_milestones WHERE parent_type = ? AND parent_id = ? ORDER BY sort, id').all(parentType, parentId);
+  const fixed = rows.filter((m) => m.kind !== 'remainder').reduce((s, m) => s + (m.kind === 'percent' ? round2((base * m.value) / 100) : round2(m.value)), 0);
+  return rows.map((m) => {
+    const amount = m.kind === 'percent' ? round2((base * m.value) / 100) : m.kind === 'amount' ? round2(m.value) : round2(Math.max(0, base - fixed));
+    const inv = m.invoice_id ? db.prepare('SELECT id, number, status FROM invoices WHERE id = ?').get(m.invoice_id) : null;
+    return { ...m, amount, invoice: inv || null };
+  });
+}
+
+export function replaceMilestones(parentType, parentId, list = []) {
+  const existing = new Map(db.prepare('SELECT id, invoice_id FROM payment_milestones WHERE parent_type = ? AND parent_id = ?').all(parentType, parentId).map((m) => [m.id, m.invoice_id]));
+  db.prepare('DELETE FROM payment_milestones WHERE parent_type = ? AND parent_id = ?').run(parentType, parentId);
+  const remainders = list.filter((m) => m && m.kind === 'remainder').length;
+  if (remainders > 1) throw new HttpError(400, 'Only one payment can be "the remaining balance"');
+  list.forEach((m, i) => {
+    if (!m || !String(m.label || '').trim()) return;
+    const kind = ['percent', 'amount', 'remainder'].includes(m.kind) ? m.kind : 'percent';
+    db.prepare('INSERT INTO payment_milestones (parent_type, parent_id, label, kind, value, due_date, invoice_id, sort) VALUES (?,?,?,?,?,?,?,?)')
+      .run(parentType, parentId, String(m.label).trim(), kind, kind === 'remainder' ? 0 : Number(m.value) || 0, m.due_date || null, m.id && existing.has(Number(m.id)) ? existing.get(Number(m.id)) : null, i);
+  });
+}
+
+export function copyMilestones(fromType, fromId, toType, toId) {
+  const rows = db.prepare('SELECT label, kind, value, due_date FROM payment_milestones WHERE parent_type = ? AND parent_id = ? ORDER BY sort, id').all(fromType, fromId);
+  replaceMilestones(toType, toId, rows);
+}
+
+/** Parse the JSON custom-field values stored on a record. */
+export function parseCustom(row) {
+  if (row && typeof row.custom === 'string') { try { row.custom = JSON.parse(row.custom || '{}'); } catch { row.custom = {}; } }
+  return row;
 }

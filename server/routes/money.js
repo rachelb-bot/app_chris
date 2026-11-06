@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db, getSettings, nextNumber, logActivity } from '../db.js';
 import { requireRole, isOffice } from '../auth.js';
 import { HttpError, bad, notFound, pick, insert, update, clientName, token, today, addDays, nowIso, round2,
-  getLineItems, replaceLineItems, copyLineItems, invoiceTotals, invoiceDisplayStatus } from '../lib.js';
+  getLineItems, replaceLineItems, copyLineItems, invoiceTotals, invoiceDisplayStatus, parseCustom } from '../lib.js';
 import { getClient } from './crm.js';
 import { sendEmail } from '../mailer.js';
 import { formatMoney, hubUrl } from '../format.js';
@@ -11,7 +11,7 @@ const r = Router();
 const office = requireRole('office');
 
 // ======================= INVOICES =======================
-const INVOICE_FIELDS = ['client_id', 'property_id', 'job_id', 'subject', 'issue_date', 'due_date', 'discount', 'tax_rate', 'client_message', 'notes', 'terms', 'show_quantities', 'show_unit_prices', 'show_line_totals'];
+const INVOICE_FIELDS = ['client_id', 'property_id', 'job_id', 'subject', 'issue_date', 'due_date', 'discount', 'tax_rate', 'client_message', 'notes', 'terms', 'show_quantities', 'show_unit_prices', 'show_line_totals', 'custom'];
 
 export function getInvoice(id) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
@@ -22,6 +22,7 @@ export function getInvoice(id) {
   inv.totals = invoiceTotals(inv);
   inv.display_status = invoiceDisplayStatus(inv, inv.totals);
   inv.payments = db.prepare('SELECT * FROM payments WHERE invoice_id = ? ORDER BY paid_on').all(inv.id);
+  parseCustom(inv);
   inv.job = inv.job_id ? db.prepare('SELECT id, number, title FROM jobs WHERE id = ?').get(inv.job_id) : null;
   return inv;
 }

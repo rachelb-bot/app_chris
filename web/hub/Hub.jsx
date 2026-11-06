@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { CheckCircle2, Printer, ArrowLeft } from 'lucide-react';
+import { CheckCircle2, Printer, ArrowLeft, Paperclip } from 'lucide-react';
 import { api } from '../api.js';
 import { money, date, configureFormat, IS_DEMO } from '../format.js';
 import { Loading, Field, Status, useAction } from '../components/ui.jsx';
@@ -42,6 +42,7 @@ function Lines({ items, selectable, selected, onToggle, doc = {} }) {
             <td>
               <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
                 {selectable && !!it.optional && <input type="checkbox" checked={selected.has(it.id)} onChange={() => onToggle(it.id)} style={{ width: 17, height: 17, marginTop: 2, accentColor: 'var(--ink)' }} aria-label={`Include ${it.name}`} />}
+                {it.image && <img src={it.image} alt="" className="li-photo" />}
                 <div><div className="strong">{it.name}{!!it.optional && <span className="badge" style={{ marginLeft: 6 }}>Optional{!line && !unit ? ` · ${money(it.quantity * it.unit_price)}` : ''}</span>}</div>{it.description && <div className="small muted pre">{it.description}</div>}</div>
               </div>
             </td>
@@ -51,6 +52,38 @@ function Lines({ items, selectable, selected, onToggle, doc = {} }) {
       </tbody>
     </table>
   );
+}
+
+/** Extra details, payment schedule and shared files shown under a quote or invoice. */
+function Extras({ custom = [], milestones = [], files = [], kind, token, taxRate = 0 }) {
+  return (<>
+    {!!custom.length && (
+      <div className="card-pad" style={{ borderTop: '1px solid var(--border)' }}>
+        <dl className="kv">{custom.map((c) => <React.Fragment key={c.label}><dt>{c.label}</dt><dd>{c.type === 'checkbox' ? 'Yes' : c.type === 'date' ? date(c.value) : String(c.value)}</dd></React.Fragment>)}</dl>
+      </div>
+    )}
+    {!!milestones.length && (
+      <div className="card-pad" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="section-title">Payment schedule</div>
+        {milestones.map((m, i) => (
+          <div key={i} className="row mt-s"><span>{m.label}{m.kind === 'percent' ? ` (${m.value}%)` : ''}</span>{m.due_date && <span className="small muted">due {date(m.due_date)}</span>}<span className="spacer" /><b>{money(m.amount * (1 + taxRate / 100))}</b></div>
+        ))}
+      </div>
+    )}
+    {!!files.length && (
+      <div className="card-pad" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="section-title">Attachments</div>
+        <div className="files">
+          {files.map((f) => (
+            <a key={f.id} className="file" href={`/api/hub/${kind}/${token}/files/${f.id}`} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+              {f.mime?.startsWith('image/') ? <img src={`/api/hub/${kind}/${token}/files/${f.id}`} alt={f.filename} /> : <div className="ph"><Paperclip size={24} /></div>}
+              <div className="nm">{f.filename}</div>
+            </a>
+          ))}
+        </div>
+      </div>
+    )}
+  </>);
 }
 
 function totalsFor(items, sel, discount, tax_rate) {
@@ -95,6 +128,7 @@ export function QuoteHub() {
             {q.deposit > 0 && <div className="line"><span className="muted">Deposit required</span><b>{money(q.deposit)}</b></div>}
           </div>
         </div>
+        <Extras custom={data.custom} milestones={data.milestones} files={data.files} kind="quote" token={token} taxRate={q.tax_rate} />
         {(q.client_message || q.terms) && <div className="card-pad small muted pre" style={{ borderTop: '1px solid var(--border)' }}>{[q.client_message, q.terms].filter(Boolean).join('\n\n')}</div>}
       </div>
       {canAct && (
@@ -144,6 +178,7 @@ export function InvoiceHub() {
             <div className="line grand"><span>Balance due</span><span>{money(totals.balance)}</span></div>
           </div>
         </div>
+        <Extras custom={data.custom} files={data.files} kind="invoice" token={token} />
         {(inv.client_message || company.bank_details || inv.terms) && <div className="card-pad small pre" style={{ borderTop: '1px solid var(--border)' }}>{[inv.client_message, company.bank_details && `How to pay:\n${company.bank_details}\nReference: Invoice ${inv.number}`, inv.terms].filter(Boolean).join('\n\n')}</div>}
       </div>
     </HubShell>

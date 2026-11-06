@@ -5,7 +5,7 @@ import { api } from '../api.js';
 import { money, date, dateTime, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, Field, Modal, Tabs, useApp, isAdmin, isOffice, Avatar, Empty, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { LineItemsEditor } from '../components/shared.jsx';
+import { LineItemsEditor, PhotoSlot, CustomFieldModal, ENTITY_LABELS } from '../components/shared.jsx';
 
 function Company() {
   const { settings, refresh, user } = useApp();
@@ -129,7 +129,7 @@ function Products() {
         <thead><tr><th>Name</th><th>Type</th><th className="num">Price</th><th className="num">Cost</th><th className="num">Margin</th><th /></tr></thead>
         <tbody>{data.map((p) => (
           <tr key={p.id} className="clickable" onClick={() => setEdit(p)} style={{ opacity: p.active ? 1 : 0.5 }}>
-            <td><b>{p.name}</b><div className="small muted" style={{ maxWidth: 480 }}>{p.description}</div></td><td style={{ textTransform: 'capitalize' }}>{p.kind}</td>
+            <td><div className="row" style={{ alignItems: 'flex-start' }}>{p.image ? <img src={p.image} alt="" className="thumb" /> : <span className="thumb" />}<div><b>{p.name}</b><div className="small muted" style={{ maxWidth: 480 }}>{p.description}</div></div></div></td><td style={{ textTransform: 'capitalize' }}>{p.kind}</td>
             <td className="num">{money(p.unit_price)}</td><td className="num">{money(p.unit_cost)}</td><td className="num">{p.unit_price ? Math.round(((p.unit_price - p.unit_cost) / p.unit_price) * 100) : 0}%</td><td>{!p.active && <span className="badge">Archived</span>}</td>
           </tr>))}
         </tbody>
@@ -137,7 +137,11 @@ function Products() {
       {edit && (
         <Modal title={edit.id ? 'Edit item' : 'New item'} onClose={() => setEdit(null)} footer={<><button className="btn" onClick={() => setEdit(null)}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>Save</button></>}>
           <div className="form-grid">
-            <Field label="Name" full><input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} autoFocus /></Field>
+            <div className="full row" style={{ alignItems: 'flex-start', gap: 14 }}>
+              <div className="field"><span>Photo</span><PhotoSlot size={88} value={edit.image} onChange={(image) => setEdit({ ...edit, image })} /></div>
+              <div style={{ flex: 1 }}><Field label="Name"><input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} autoFocus /></Field>
+                <div className="small muted mt-s">The photo is copied onto quotes and invoices when you add this item.</div></div>
+            </div>
             <Field label="Description" full><textarea value={edit.description || ''} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></Field>
             <Field label="Type"><select value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value })}><option value="service">Service</option><option value="material">Material</option><option value="labour">Labour</option></select></Field>
             <Field label="Unit price"><input type="number" step="0.01" value={edit.unit_price} onChange={(e) => setEdit({ ...edit, unit_price: e.target.value })} /></Field>
@@ -179,6 +183,33 @@ function Templates() {
           <div className="mt"><LineItemsEditor items={edit.items} onChange={(items) => setEdit({ ...edit, items })} allowOptional /></div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+function CustomFields() {
+  const { data, reload } = useLoad('/custom-fields');
+  const [edit, setEdit] = useState(null);
+  const [run] = useAction();
+  if (!data) return <Loading />;
+  const active = data.filter((f) => f.active);
+  const TYPES = { text: 'Text', number: 'Number', date: 'Date', select: 'Dropdown', checkbox: 'Yes / no' };
+  return (
+    <div className="card">
+      <div className="card-head"><div><h3>Custom fields</h3><div className="small muted">Extra details you want to record, e.g. MPRN, board location, certificate type.</div></div><button className="btn primary sm" onClick={() => setEdit({})}><Plus size={14} /> Add field</button></div>
+      {active.length ? (
+        <div className="table-wrap"><table className="table">
+          <thead><tr><th>Field</th><th>Appears on</th><th>Type</th><th>On client's copy</th><th /></tr></thead>
+          <tbody>{active.map((f) => (
+            <tr key={f.id} className="clickable" onClick={() => setEdit(f)}>
+              <td><b>{f.label}</b>{f.field_type === 'select' && <div className="small muted">{f.options.join(' · ')}</div>}</td>
+              <td>{ENTITY_LABELS[f.entity]}</td><td>{TYPES[f.field_type]}</td><td>{['quote', 'invoice'].includes(f.entity) ? (f.show_to_client ? 'Shown' : 'Hidden') : '—'}</td>
+              <td className="right"><button className="btn sm ghost" aria-label="Remove field" onClick={(e) => { e.stopPropagation(); askConfirm(`Remove "${f.label}"? Values already saved are kept but no longer shown.`, { confirmLabel: 'Remove' }).then((ok) => ok && run(() => api.del(`/custom-fields/${f.id}`), 'Field removed').then(reload)); }}><Trash2 size={13} /></button></td>
+            </tr>))}
+          </tbody>
+        </table></div>
+      ) : <Empty title="No custom fields yet">Add fields to clients, requests, quotes, jobs or invoices. They appear on the forms straight away.</Empty>}
+      {edit && <CustomFieldModal field={edit.id ? edit : null} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
     </div>
   );
 }
@@ -227,7 +258,7 @@ export default function SettingsPage() {
   const { user } = useApp();
   const nav = useNavigate();
   const tabs = isOffice(user)
-    ? [['company', 'Company'], ['team', 'Team'], ['products', 'Products & services'], ['templates', 'Quote templates'], ['account', 'My account'], ...(isAdmin(user) ? [['data', 'Data & email log']] : [])]
+    ? [['company', 'Company'], ['team', 'Team'], ['products', 'Products & services'], ['templates', 'Quote templates'], ['fields', 'Custom fields'], ['account', 'My account'], ...(isAdmin(user) ? [['data', 'Data & email log']] : [])]
     : [['account', 'My account']];
   const current = tabs.some(([k]) => k === tab) ? tab : tabs[0][0];
   return (
@@ -238,6 +269,7 @@ export default function SettingsPage() {
       {current === 'team' && <Team />}
       {current === 'products' && <Products />}
       {current === 'templates' && <Templates />}
+      {current === 'fields' && <CustomFields />}
       {current === 'account' && <Account />}
       {current === 'data' && <Data />}
     </div>

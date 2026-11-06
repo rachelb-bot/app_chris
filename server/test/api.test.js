@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voltline-test-'));
 process.env.DATA_DIR = dir;
+process.env.GEOCODER = 'off';
 const { app } = await import('../index.js');
 let server, base, cookie = '';
 
@@ -145,4 +146,79 @@ test('client import and insights reports', async () => {
   assert.ok(ins.quotes.sent_count >= 1);
   const steps = (await call('GET', '/onboarding')).body;
   assert.ok(steps.find((s) => s.key === 'quote').done);
+});
+
+test('payment schedule raises one invoice per payment', async () => {
+  const c = (await call('POST', '/clients', { first_name: 'Sched', email: 'sched@x.ie' })).body;
+  const q = (await call('POST', '/quotes', { client_id: c.id, title: 'Rewire', items: [{ name: 'Rewire', quantity: 1, unit_price: 2000 }],
+    milestones: [{ label: 'Deposit', kind: 'percent', value: 30 }, { label: 'Balance', kind: 'remainder' }] })).body;
+  const quote = (await call('GET', `/quotes/${q.id}`)).body;
+  assert.deepEqual(quote.milestones.map((m) => m.amount), [600, 1400]);
+  await call('POST', `/quotes/${q.id}/send`, {});
+  const token = quote.public_token;
+  const hub = (await call('GET', `/hub/quote/${token}`, null, { cookie: '' })).body;
+  assert.equal(hub.milestones.length, 2, 'client sees the schedule');
+  const job = (await call('POST', `/quotes/${q.id}/convert`)).body;
+  let j = (await call('GET', `/jobs/${job.id}`)).body;
+  assert.equal(j.milestones.length, 2, 'schedule carried over to the job');
+  const inv = (await call('POST', `/jobs/${job.id}/milestones/${j.milestones[0].id}/invoice`)).body;
+  const i = (await call('GET', `/invoices/${inv.id}`)).body;
+  assert.equal(i.totals.subtotal, 600);
+  assert.equal((await call('POST', `/jobs/${job.id}/milestones/${j.milestones[0].id}/invoice`)).status, 400, 'no double invoicing');
+  await call('POST', `/jobs/${job.id}/complete`);
+  j = (await call('GET', `/jobs/${job.id}`)).body;
+  assert.equal(j.display_status, 'requires_invoicing', 'balance still to invoice');
+  await call('POST', `/jobs/${job.id}/milestones/${j.milestones[1].id}/invoice`);
+  assert.equal((await call('GET', `/jobs/${job.id}`)).body.display_status, 'completed');
+  // editing the schedule keeps the invoice links
+  j = (await call('GET', `/jobs/${job.id}`)).body;
+  await call('PUT', `/jobs/${job.id}/milestones`, { milestones: j.milestones.map((m) => ({ ...m, due_date: '2030-01-01' })) });
+  assert.ok((await call('GET', `/jobs/${job.id}`)).body.milestones.every((m) => m.invoice));
+});
+
+test('import old quotes, jobs and invoices', async () => {
+  const q = (await call('POST', '/import/quotes', { rows: [
+    { number: '501', client_name: 'Old Client Ltd', client_email: 'old@x.ie', title: 'Board swap', date: '15/03/2025', status: 'Accepted', item: 'Board', quantity: '1', unit_price: '900' },
+    { number: '501', client_name: 'Old Client Ltd', client_email: 'old@x.ie', title: 'Board swap', date: '15/03/2025', status: 'Accepted', item: 'RCBO', quantity: '2', unit_price: '€75.00' },
+    { number: '502', client_name: 'Ann Lee', title: 'Sockets', date: '2025-04-01', status: 'declined', total: '300' },
+  ] })).body;
+  assert.deepEqual(q, { created: 2, skipped: 0, clients: 1 });
+  const list = (await call('GET', '/quotes?status=all')).body;
+  const q501 = list.find((x) => x.number === 501);
+  assert.equal(q501.subtotal, 1050);
+  assert.equal(q501.status, 'approved');
+  assert.equal(list.find((x) => x.number === 502).client_name, 'Ann Lee', 'matched existing client by name');
+  const inv = (await call('POST', '/import/invoices', { prices_include_tax: true, rows: [
+    { number: '7001', client_email: 'old@x.ie', title: 'Board swap', date: '20/03/2025', status: 'Paid', total: '1050', paid_date: '30/03/2025' },
+    { number: '7002', client_email: 'old@x.ie', title: 'Extra', date: '2025-05-01', status: 'Unpaid', total: '200', amount_paid: '50' },
+  ] })).body;
+  assert.equal(inv.created, 2);
+  const invs = (await call('GET', '/invoices?status=all')).body;
+  assert.equal(invs.find((x) => x.number === 7001).display_status, 'paid');
+  assert.equal(invs.find((x) => x.number === 7002).balance, 150);
+  const jobs = (await call('POST', '/import/jobs', { rows: [{ client_email: 'old@x.ie', title: 'Board swap', date: '2025-03-25', status: 'Completed', total: '1050' }] })).body;
+  assert.equal(jobs.created, 1);
+});
+
+test('custom fields, product photos, shared files and map data', async () => {
+  const f = (await call('POST', '/custom-fields', { entity: 'quote', label: 'Duration', field_type: 'text', show_to_client: 1 })).body;
+  const hidden = (await call('POST', '/custom-fields', { entity: 'quote', label: 'Internal margin note', field_type: 'text' })).body;
+  const c = (await call('POST', '/clients', { first_name: 'Cf', email: 'cf@x.ie', property: { street: '1 Main St', city: 'Cork', lat: 51.9, lng: -8.47 } })).body;
+  const photo = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const q = (await call('POST', '/quotes', { client_id: c.id, title: 'Custom', custom: { [f.id]: '2 days', [hidden.id]: 'secret' },
+    items: [{ name: 'Panel', quantity: 1, unit_price: 100, image: photo }, { name: 'Bad', quantity: 1, unit_price: 1, image: 'javascript:alert(1)' }] })).body;
+  const quote = (await call('GET', `/quotes/${q.id}`)).body;
+  assert.equal(quote.custom[f.id], '2 days');
+  assert.equal(quote.items[0].image, photo);
+  assert.equal(quote.items[1].image, null, 'non-image data is dropped');
+  await call('POST', `/quotes/${q.id}/send`, {});
+  const hub = (await call('GET', `/hub/quote/${quote.public_token}`, null, { cookie: '' })).body;
+  assert.deepEqual(hub.custom.map((x) => x.label), ['Duration'], 'only client-visible fields are shared');
+  assert.equal(hub.items[0].image, photo);
+  assert.deepEqual(hub.files, []);
+  const p = (await call('POST', '/products', { name: 'Pictured', unit_price: 10, image: photo })).body;
+  assert.equal((await call('GET', '/products')).body.find((x) => x.id === p.id).image, photo);
+  const ins = (await call('GET', `/insights?from=2020-01-01`)).body;
+  assert.ok(Array.isArray(ins.revenueMap.points));
+  assert.equal(ins.revenueMap.geocoding, false);
 });

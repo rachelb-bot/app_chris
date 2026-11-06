@@ -5,7 +5,9 @@ import { api, qs } from '../api.js';
 import { money, date, ymd, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useToast, useApp, isAdmin, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient, ClientViewOptions } from '../components/shared.jsx';
+import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient, ClientViewOptions, CustomFieldsEditor, CustomFieldsView } from '../components/shared.jsx';
+import { DocImportModal } from '../components/Import.jsx';
+import { Upload } from 'lucide-react';
 import { SendModal, DocHeader } from './Quotes.jsx';
 
 export function InvoicesList() {
@@ -13,12 +15,14 @@ export function InvoicesList() {
   const status = params.get('status') || 'all';
   const [q, setQ] = useState('');
   const dq = useDebounced(q);
-  const { data, loading } = useLoad(`/invoices${qs({ status, q: dq })}`);
-  const { data: stats } = useLoad('/invoices/stats');
+  const { data, loading, reload } = useLoad(`/invoices${qs({ status, q: dq })}`);
+  const { data: stats, reload: reloadStats } = useLoad('/invoices/stats');
   const nav = useNavigate();
+  const [importing, setImporting] = useState(false);
   return (
     <div>
-      <PageHead title="Invoices"><Link className="btn primary" to="/invoices/new"><Plus size={16} /> New invoice</Link></PageHead>
+      <PageHead title="Invoices"><button className="btn" onClick={() => setImporting(true)}><Upload size={15} /> Import</button><Link className="btn primary" to="/invoices/new"><Plus size={16} /> New invoice</Link></PageHead>
+      {importing && <DocImportModal kind="invoices" onClose={() => setImporting(false)} onDone={() => { setImporting(false); reload(); reloadStats(); }} />}
       {stats && (
         <div className="grid g4 mb">
           <button className="card stat" style={{ textAlign: 'left', cursor: 'pointer', font: 'inherit' }} onClick={() => setParams({ status: 'overdue' })}><div className="label">Overdue</div><div className="value" style={{ color: stats.overdue.amount ? 'var(--red)' : undefined }}>{money(stats.overdue.amount)}</div><div className="hint">{stats.overdue.count} invoices</div></button>
@@ -97,6 +101,7 @@ export function InvoiceForm() {
             <Field label="Client message (shown on invoice)" full><textarea value={f.client_message || ''} onChange={set('client_message')} /></Field>
             <Field label="Contract / disclaimer" full><textarea rows={3} value={f.terms || ''} onChange={set('terms')} /></Field>
             <ClientViewOptions value={f} onChange={(p) => setF({ ...f, ...p })} />
+            <CustomFieldsEditor entity="invoice" value={f.custom} onChange={(custom) => setF({ ...f, custom })} />
             <Field label="Internal notes (not shown to client)" full><textarea value={f.notes || ''} onChange={set('notes')} placeholder="Leave an internal note for yourself or a team member" /></Field>
           </div>
         </div>
@@ -171,6 +176,7 @@ export function InvoiceDetail() {
             </div>
             {(inv.client_message || inv.terms) && <div className="card-pad small muted pre" style={{ borderTop: '1px solid var(--border)' }}>{[inv.client_message, settings.bank_details, inv.terms].filter(Boolean).join('\n\n')}</div>}
           </div>
+          {inv.custom && Object.keys(inv.custom).length > 0 && <div className="card card-pad"><dl className="kv"><CustomFieldsView entity="invoice" value={inv.custom} /></dl></div>}
           <Attachments type="invoice" id={inv.id} />
         </div>
         <div className="stack no-print">

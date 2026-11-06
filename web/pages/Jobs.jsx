@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Wrench, Plus, MoreHorizontal, Pencil, Trash2, Archive, Receipt, CheckCircle2, Search, CalendarPlus, Circle, RotateCcw, X } from 'lucide-react';
+import { Wrench, Plus, MoreHorizontal, Pencil, Trash2, Archive, Receipt, CheckCircle2, Search, CalendarPlus, Circle, RotateCcw, X, Upload, CalendarClock } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { money, date, time, dateTime, toLocalInput, fromLocalInput, hours, ymd } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useApp, isOffice, isAdmin, Avatars, Avatar, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient } from '../components/shared.jsx';
+import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient, CustomFieldsEditor, CustomFieldsView, MilestonesEditor, computeTotals } from '../components/shared.jsx';
+import { DocImportModal } from '../components/Import.jsx';
 
 export function JobsList() {
   const { user } = useApp();
@@ -13,12 +14,14 @@ export function JobsList() {
   const status = params.get('status') || '';
   const [q, setQ] = useState('');
   const dq = useDebounced(q);
-  const { data, loading } = useLoad(`/jobs${qs({ status, q: dq })}`);
+  const { data, loading, reload } = useLoad(`/jobs${qs({ status, q: dq })}`);
   const nav = useNavigate();
+  const [importing, setImporting] = useState(false);
   const office = isOffice(user);
   return (
     <div>
-      <PageHead title="Jobs">{office && <Link className="btn primary" to="/jobs/new"><Plus size={16} /> New job</Link>}</PageHead>
+      <PageHead title="Jobs">{office && <button className="btn" onClick={() => setImporting(true)}><Upload size={15} /> Import</button>}{office && <Link className="btn primary" to="/jobs/new"><Plus size={16} /> New job</Link>}</PageHead>
+      {importing && <DocImportModal kind="jobs" onClose={() => setImporting(false)} onDone={() => { setImporting(false); reload(); }} />}
       <div className="card">
         <div className="card-head" style={{ flexWrap: 'wrap' }}>
           <Chips value={status} onChange={(s) => setParams(s ? { status: s } : {})} options={[['', 'All open'], ['active', 'Active'], ['late', 'Late'], ['unscheduled', 'Unscheduled'], ['action_required', 'Action required'], ['requires_invoicing', 'Requires invoicing'], ['completed', 'Completed'], ['archived', 'Archived']]} />
@@ -117,6 +120,8 @@ export function JobForm() {
             <Field label="Job type"><select value={f.job_type} onChange={set('job_type')}><option value="one_off">One-off job</option><option value="recurring">Recurring job (e.g. periodic maintenance)</option></select></Field>
             <Field label="Invoicing"><select value={f.billing} onChange={set('billing')}><option value="on_completion">Invoice when job is closed</option><option value="per_visit">Invoice after each visit</option><option value="none">Don't remind me to invoice</option></select></Field>
             <Field label="Certificate number (optional)"><input value={f.certificate_no || ''} onChange={set('certificate_no')} /></Field>
+            <CustomFieldsEditor entity="job" value={f.custom} onChange={(custom) => setF({ ...f, custom })} />
+            {!id && <label className="check full"><input type="checkbox" checked={!!f.split} onChange={(e) => setF({ ...f, split: e.target.checked, milestones: e.target.checked ? f.milestones || [] : [] })} /> Split into multiple invoices with a payment schedule</label>}
           </div>
         </div>
         {!id && (
@@ -154,6 +159,12 @@ export function JobForm() {
           <LineItemsEditor items={f.items} onChange={(items) => setF({ ...f, items })} />
           <div className="mt"><TotalsEditor items={f.items} discount={0} tax_rate={0} onChange={() => {}} readOnly /></div>
         </div>
+        {!id && f.split && (
+          <div className="card card-pad">
+            <div className="section-title">Payment schedule</div>
+            <MilestonesEditor value={f.milestones || []} onChange={(milestones) => setF({ ...f, milestones })} base={computeTotals(f.items).subtotal} />
+          </div>
+        )}
         <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
           <button className="btn" onClick={() => nav(-1)}>Cancel</button>
           <button className="btn primary" disabled={busy} onClick={save}>Save job</button>
@@ -244,6 +255,7 @@ export function JobDetail() {
               {j.quote && <><dt>From quote</dt><dd><Link to={`/quotes/${j.quote.id}`}>#{j.quote.number} {j.quote.title}</Link></dd></>}
               {j.certificate_no && <><dt>Certificate #</dt><dd>{j.certificate_no}</dd></>}
               {!!j.invoices.length && <><dt>Invoices</dt><dd>{j.invoices.map((i) => <Link key={i.id} to={`/invoices/${i.id}`} style={{ marginRight: 8 }}>#{i.number}</Link>)}</dd></>}
+              <CustomFieldsView entity="job" value={j.custom} />
               <dt>Instructions</dt><dd className="pre">{j.instructions || '—'}</dd>
             </dl>
           </div>
@@ -290,6 +302,8 @@ export function JobDetail() {
             </div>
           </div>
 
+          {office && <PaymentSchedule job={j} onChange={reload} />}
+
           <div className="card">
             <div className="card-head"><h3>Line items</h3>{office && <Link className="btn sm" to={`/jobs/${j.id}/edit`}>Edit</Link>}</div>
             <DocLines items={j.items} showOptional={false} />
@@ -321,6 +335,54 @@ export function JobDetail() {
       </div>
       {visit && <VisitModal jobId={j.id} visit={visit.id ? visit : null} onClose={() => setVisit(null)} onSaved={() => { setVisit(null); reload(); }} />}
       {del && <Confirm danger title="Delete job?" confirmLabel="Delete" onClose={() => setDel(false)} onConfirm={() => api.del(`/jobs/${j.id}`).then(() => nav('/jobs'))}>Job #{j.number}, its visits and checklist will be permanently removed.</Confirm>}
+    </div>
+  );
+}
+
+/** A job's payment schedule: deposit and stage payments, each raised as its own invoice. */
+function PaymentSchedule({ job, onChange }) {
+  const [editing, setEditing] = useState(null);
+  const [run, busy] = useAction();
+  const nav = useNavigate();
+  const { settings } = useApp();
+  const ms = job.milestones || [];
+  const tax = Number(settings.tax_rate) || 0;
+  const today = ymd();
+  if (!ms.length && !editing) {
+    return (
+      <div className="card card-pad row wrap">
+        <div style={{ flex: 1, minWidth: 200 }}><h3>Payment schedule</h3><div className="small muted">Split this job into a deposit and stage payments, each with its own invoice.</div></div>
+        <button className="btn sm" onClick={() => setEditing([])}><CalendarClock size={14} /> Set up payment schedule</button>
+      </div>
+    );
+  }
+  return (
+    <div className="card">
+      <div className="card-head"><h3>Payment schedule</h3>{!editing && <button className="btn sm" onClick={() => setEditing(ms)}><Pencil size={13} /> Edit</button>}</div>
+      {editing ? (
+        <div className="card-pad">
+          <MilestonesEditor value={editing} onChange={setEditing} base={job.totals?.subtotal || 0} taxRate={tax} />
+          <div className="row mt"><span className="spacer" /><button className="btn" onClick={() => setEditing(null)}>Cancel</button>
+            <button className="btn primary" disabled={busy} onClick={() => run(() => api.put(`/jobs/${job.id}/milestones`, { milestones: editing }), 'Payment schedule saved').then(() => { setEditing(null); onChange(); }).catch(() => {})}>Save schedule</button></div>
+        </div>
+      ) : (
+        <ul className="list-plain" style={{ padding: '0 20px' }}>
+          {ms.map((m) => {
+            const due = m.due_date && m.due_date <= today && !m.invoice;
+            return (
+              <li key={m.id} className="row wrap">
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <b>{m.label}</b>{m.kind === 'percent' && <span className="muted"> · {m.value}%</span>}{m.kind === 'remainder' && <span className="muted"> · remaining balance</span>}
+                  <div className={`small ${due ? 'overdue' : 'muted'}`}>{m.due_date ? `${due ? 'Due since' : 'Due'} ${date(m.due_date)}` : 'No due date'}</div>
+                </div>
+                <div className="right"><b>{money(m.amount * (1 + tax / 100))}</b><div className="small faint">{money(m.amount)} + tax</div></div>
+                {m.invoice ? <Link className="btn sm" to={`/invoices/${m.invoice.id}`}><Receipt size={14} /> Invoice #{m.invoice.number}</Link>
+                  : <button className={`btn sm ${due ? 'primary' : ''}`} disabled={busy} onClick={() => run(() => api.post(`/jobs/${job.id}/milestones/${m.id}/invoice`), 'Invoice created').then((r) => nav(`/invoices/${r.id}`)).catch(() => {})}><Receipt size={14} /> Create invoice</button>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

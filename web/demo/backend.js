@@ -7,7 +7,7 @@ const STORE_KEY = 'voltline-preview-db-v1';
 const COOKIE_KEY = 'voltline-preview-cookies';
 
 globalThis.process = globalThis.process || { env: {}, argv: [], cwd: () => '/', platform: 'browser' };
-Object.assign(globalThis.process.env, { NODE_ENV: 'production', SESSION_SECRET: 'voltline-browser-preview', DATA_DIR: '/preview' });
+Object.assign(globalThis.process.env, { NODE_ENV: 'production', SESSION_SECRET: 'voltline-browser-preview', DATA_DIR: '/preview', GEOCODER: 'off' });
 globalThis.Buffer = globalThis.Buffer || { from: (s) => String(s) };
 
 const safe = (fn, fallback) => { try { return fn(); } catch { return fallback; } };
@@ -74,7 +74,8 @@ export async function boot() {
   ]);
   const pipeline = await import('../../server/routes/pipeline.js');
   pipeline.backfillDeals();
-  layers = [hub.default, loadUser, core.default, crm.default, work.default, money.default, insights.default, pipeline.default];
+  const imports = await import('../../server/routes/imports.js');
+  layers = [hub.default, loadUser, core.default, crm.default, work.default, money.default, insights.default, pipeline.default, imports.default];
 
   const realFetch = window.fetch.bind(window);
   window.fetch = async (input, init = {}) => {

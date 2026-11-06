@@ -5,7 +5,7 @@ import { api, qs } from '../api.js';
 import { money, date, dateTime, toLocalInput, fromLocalInput, ago, ymd, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, useDebounced, useToast } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { ClientPicker, PropertySelect, LineItemsEditor, Notes, Attachments, DocLines, useClient } from '../components/shared.jsx';
+import { ClientPicker, PropertySelect, LineItemsEditor, Notes, Attachments, DocLines, useClient, CustomFieldsEditor, CustomFieldsView } from '../components/shared.jsx';
 
 export function RequestsList() {
   const [params, setParams] = useSearchParams();
@@ -83,6 +83,7 @@ export function RequestForm() {
             <Field label="Requested on"><input type="date" value={f.requested_on || ''} onChange={set('requested_on')} /></Field>
             {!IS_DEMO && <Field label="Photos of the work to be done" full hint={photos.length ? `${photos.length} photo${photos.length === 1 ? '' : 's'} will be attached` : 'Up to 10 images'}><input type="file" accept="image/*" multiple onChange={(e) => setPhotos([...e.target.files].slice(0, 10))} /></Field>}
             <Field label="Source"><select value={f.source || ''} onChange={set('source')}>{['Phone', 'Email', 'Website', 'Online booking', 'Walk-in', 'Referral', 'Other'].map((s) => <option key={s}>{s}</option>)}</select></Field>
+            <CustomFieldsEditor entity="request" value={f.custom} onChange={(custom) => setF({ ...f, custom })} />
           </div>
         </div>
         <div className="card card-pad">
@@ -137,6 +138,7 @@ export function RequestDetail() {
               <dt>Source</dt><dd>{r.source || '—'}</dd>
               <dt>Property</dt><dd>{r.property?.address || '—'}</dd>
               <dt>Details</dt><dd className="pre">{r.details || '—'}</dd>
+              <CustomFieldsView entity="request" value={r.custom} />
             </dl>
           </div>
           <div className="card card-pad">

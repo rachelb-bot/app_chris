@@ -2,16 +2,18 @@ import { Router } from 'express';
 import { db, logActivity } from '../db.js';
 import { requireRole } from '../auth.js';
 import { syncDeal } from './pipeline.js';
-import { bad, notFound, pick, insert, update, clientName, formatAddress, getLineItems, replaceLineItems, computeTotals, invoiceTotals, invoiceDisplayStatus, jobDisplayStatus } from '../lib.js';
+import { queueGeocode } from '../geocode.js';
+import { bad, notFound, pick, insert, update, clientName, formatAddress, getLineItems, replaceLineItems, computeTotals, invoiceTotals, invoiceDisplayStatus, jobDisplayStatus, parseCustom } from '../lib.js';
 
 const r = Router();
-const CLIENT_FIELDS = ['first_name', 'last_name', 'company_name', 'email', 'phone', 'status', 'client_type', 'lead_source', 'notes'];
-const PROPERTY_FIELDS = ['street', 'city', 'region', 'postcode', 'country', 'notes'];
+const CLIENT_FIELDS = ['first_name', 'last_name', 'company_name', 'email', 'phone', 'status', 'client_type', 'lead_source', 'notes', 'custom'];
+const PROPERTY_FIELDS = ['street', 'city', 'region', 'postcode', 'country', 'notes', 'lat', 'lng'];
 
 export function getClient(id) {
   const c = db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
   if (!c) throw notFound('Client');
   c.tags = JSON.parse(c.tags || '[]');
+  parseCustom(c);
   c.name = clientName(c);
   c.properties = db.prepare('SELECT * FROM properties WHERE client_id = ? ORDER BY id').all(id).map((p) => ({ ...p, address: formatAddress(p) }));
   return c;
@@ -95,7 +97,7 @@ r.post('/clients', requireRole('office'), (req, res) => {
   const id = db.transaction(() => {
     const cid = insert('clients', { ...d, status: d.status || 'lead', tags: JSON.stringify(req.body.tags || []) });
     const p = pick(req.body.property || {}, PROPERTY_FIELDS);
-    if (Object.values(p).some(Boolean)) insert('properties', { ...p, client_id: cid });
+    if (Object.values(p).some(Boolean)) queueGeocode(insert('properties', { ...p, client_id: cid }));
     logActivity({ userId: req.user.id, entityType: 'client', entityId: cid, clientId: cid, action: 'created', summary: `Client ${clientName(d)} created` });
     return cid;
   })();
@@ -164,10 +166,17 @@ r.post('/clients/import', requireRole('office'), (req, res) => {
 // ---------------- properties ----------------
 r.post('/clients/:id/properties', requireRole('office'), (req, res) => {
   getClient(req.params.id);
-  res.json({ id: insert('properties', { ...pick(req.body, PROPERTY_FIELDS), client_id: Number(req.params.id) }) });
+  const p = pick(req.body, PROPERTY_FIELDS);
+  const id = insert('properties', { ...p, client_id: Number(req.params.id) });
+  if (p.lat == null) queueGeocode(id);
+  res.json({ id });
 });
 r.put('/properties/:id', requireRole('office'), (req, res) => {
-  update('properties', req.params.id, pick(req.body, PROPERTY_FIELDS));
+  const p = pick(req.body, PROPERTY_FIELDS);
+  const addressChanged = ['street', 'city', 'region', 'postcode', 'country'].some((k) => k in p);
+  if (addressChanged && !('lat' in p)) { p.lat = null; p.lng = null; p.geocoded_at = null; }
+  update('properties', req.params.id, p);
+  if (addressChanged && p.lat == null) queueGeocode(Number(req.params.id));
   res.json({ ok: true });
 });
 r.delete('/properties/:id', requireRole('office'), (req, res) => {
@@ -176,7 +185,7 @@ r.delete('/properties/:id', requireRole('office'), (req, res) => {
 });
 
 // ---------------- requests ----------------
-const REQUEST_FIELDS = ['client_id', 'property_id', 'title', 'details', 'source', 'status', 'assessment_start', 'assessment_end', 'assigned_to', 'requested_on'];
+const REQUEST_FIELDS = ['client_id', 'property_id', 'title', 'details', 'source', 'status', 'assessment_start', 'assessment_end', 'assigned_to', 'requested_on', 'custom'];
 
 function getRequest(id) {
   const x = db.prepare('SELECT * FROM requests WHERE id = ?').get(id);
@@ -186,6 +195,7 @@ function getRequest(id) {
   x.items = getLineItems('request', x.id);
   x.totals = computeTotals(x.items);
   x.quotes = db.prepare('SELECT id, number, title, status FROM quotes WHERE request_id = ?').all(x.id);
+  parseCustom(x);
   x.assignee = x.assigned_to ? db.prepare('SELECT id, name, color FROM users WHERE id = ?').get(x.assigned_to) : null;
   return x;
 }

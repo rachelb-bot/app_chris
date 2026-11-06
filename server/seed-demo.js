@@ -4,13 +4,14 @@ import { insert, replaceLineItems, token, addDays, today } from './lib.js';
 import { hashPassword } from './auth.js';
 import { seedDefaults, DEFAULT_PRODUCTS } from './seed-defaults.js';
 import { backfillDeals } from './routes/pipeline.js';
+import { productImage } from './product-images.js';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const iso = (d, h = 9, m = 0) => { const x = new Date(d + 'T00:00:00'); x.setHours(h, m, 0, 0); return x.toISOString(); };
 const dt = (daysAgo) => new Date(Date.now() - daysAgo * 864e5).toISOString().replace('T', ' ').slice(0, 19);
-const P = (name, qty = 1, extra = {}) => { const p = DEFAULT_PRODUCTS.find((x) => x[0] === name); return { name: p[0], description: p[1], quantity: qty, unit_price: p[3], unit_cost: p[4], ...extra }; };
+const P = (name, qty = 1, extra = {}) => { const p = DEFAULT_PRODUCTS.find((x) => x[0] === name); return { name: p[0], description: p[1], quantity: qty, unit_price: p[3], unit_cost: p[4], image: productImage(p[0]), ...extra }; };
 
 export function seedDemo() {
 db.transaction(() => {
@@ -32,6 +33,8 @@ db.transaction(() => {
   });
   const [aoife, liam, sean, ciara] = team;
 
+  const COORDS = { Lucan: [53.3573, -6.4486], Clondalkin: [53.3203, -6.3946], Naas: [53.2159, -6.6669], Tallaght: [53.2859, -6.3733], 'Dublin 2': [53.3381, -6.2463], Celbridge: [53.3399, -6.5393], Saggart: [53.2803, -6.4433] };
+  const jitter = (i) => ((i * 7919) % 100) / 10000;
   const clientData = [
     ['Rachel', 'Nolan', null, 'rachel.nolan@example.com', '087 123 4567', 'residential', 'Google', ['EV'], '14 Riverside Drive', 'Lucan', 'Co. Dublin', 'K78 X2Y4', 2],
     ['Declan', 'Ryan', null, 'declan.ryan@example.com', '086 222 3344', 'residential', 'Referral', ['landlord'], '7 Oak Park', 'Clondalkin', 'Dublin 22', 'D22 F3K9', 40],
@@ -44,7 +47,8 @@ db.transaction(() => {
   ];
   const clients = clientData.map(([first_name, last_name, company_name, email, phone, client_type, lead_source, tags, street, city, region, postcode, age]) => {
     const id = insert('clients', { first_name, last_name, company_name, email, phone, client_type, lead_source, tags: JSON.stringify(tags), status: 'lead', created_at: dt(age), updated_at: dt(Math.max(0, age - 1)) });
-    const pid = insert('properties', { client_id: id, street, city, region, postcode, country: 'Ireland', created_at: dt(age) });
+    const [lat, lng] = COORDS[city] || [null, null];
+    const pid = insert('properties', { client_id: id, street, city, region, postcode, country: 'Ireland', created_at: dt(age), lat: lat && lat + jitter(age), lng: lng && lng - jitter(age + 3), geocoded_at: lat ? new Date().toISOString() : null });
     return { id, pid, name: company_name || `${first_name} ${last_name}` };
   });
   const active = (cid) => db.prepare("UPDATE clients SET status='active' WHERE id = ?").run(cid);
@@ -92,6 +96,17 @@ db.transaction(() => {
     visits: [{ start: iso(addDays(t, -1), 10), end: iso(addDays(t, -1), 15), status: 'completed', team: [liam, ciara] }] });
   const j6 = mkJob(clients[0], 'Downlights in kitchen extension', [P('LED downlight (supply & fit)', 10), P('Labour – Electrician (per hour)', 4)], { created_at: dt(1) });
 
+  // Custom fields
+  insert('custom_fields', { entity: 'client', label: 'MPRN (meter number)', field_type: 'text', sort: 0 });
+  insert('custom_fields', { entity: 'job', label: 'Certificate type', field_type: 'select', options: JSON.stringify(['Completion certificate', 'Periodic inspection report', 'Minor works certificate', 'None needed']), sort: 0 });
+  insert('custom_fields', { entity: 'job', label: 'Supply isolated by ESB Networks', field_type: 'checkbox', sort: 1 });
+  insert('custom_fields', { entity: 'quote', label: 'Estimated duration', field_type: 'text', show_to_client: 1, sort: 0 });
+  db.prepare("UPDATE jobs SET custom = ? WHERE id = ?").run(JSON.stringify({ 2: 'Completion certificate' }), j1);
+  db.prepare("UPDATE clients SET custom = ? WHERE id = ?").run(JSON.stringify({ 1: '10012345678' }), clients[3].id);
+  // Payment schedule on the café job: 30% deposit, 40% at first fix, balance on completion
+  [['Deposit', 'percent', 30, addDays(t, -10)], ['First fix complete', 'percent', 40, addDays(t, 2)], ['Final balance', 'remainder', 0, null]]
+    .forEach(([label, kind, value, due_date], i) => insert('payment_milestones', { parent_type: 'job', parent_id: j1, label, kind, value, due_date, sort: i }));
+
   // Invoices & payments
   const mkInv = (c, jobId, subject, items, issueAgo, status, payments = []) => {
     const issue = addDays(t, -issueAgo);
@@ -103,7 +118,8 @@ db.transaction(() => {
   mkInv(clients[1], j4, 'Replace faulty RCD & 4 sockets', [P('Call-out / Diagnostic visit'), P('RCD / GFCI outlet replacement', 4)], 17, 'paid', [[493.43, 10, 'bank_transfer']]);
   db.prepare("UPDATE invoices SET paid_at = ? WHERE job_id = ?").run(new Date(Date.now() - 10 * 864e5).toISOString(), j4);
   mkInv(clients[5], null, 'Emergency call-out – common area lighting', [P('Call-out / Diagnostic visit'), P('Labour – Electrician (per hour)', 3), P('LED downlight (supply & fit)', 6)], 30, 'sent');
-  mkInv(clients[2], null, 'Deposit – kitchen circuits', [{ name: 'Deposit (30%)', quantity: 1, unit_price: 400 }], 12, 'sent', [[200, 5, 'card']]);
+  const depInv = mkInv(clients[2], j1, 'Deposit – Café kitchen – new circuits for equipment', [{ name: 'Deposit', description: '30% of job #1001', quantity: 1, unit_price: 366 }], 12, 'sent', [[200, 5, 'card']]);
+  db.prepare("UPDATE payment_milestones SET invoice_id = ? WHERE parent_type = 'job' AND parent_id = ? AND label = 'Deposit'").run(depInv, j1);
   // Historic revenue so charts have shape
   const histC = [clients[5], clients[2], clients[1], clients[3]];
   for (let m = 1; m <= 10; m++) {

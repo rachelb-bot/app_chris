@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { db, getSettings, setSettings, nextNumber, logActivity } from '../db.js';
 import { requireRole, isOffice } from '../auth.js';
 import { HttpError, bad, notFound, pick, insert, update, clientName, token, today, addDays, nowIso,
-  getLineItems, replaceLineItems, copyLineItems, computeTotals, jobDisplayStatus } from '../lib.js';
+  getLineItems, replaceLineItems, copyLineItems, computeTotals, jobDisplayStatus,
+  getMilestones, replaceMilestones, copyMilestones, parseCustom } from '../lib.js';
 import { getClient, promoteLead } from './crm.js';
 import { sendEmail } from '../mailer.js';
 import { formatMoney, hubUrl } from '../format.js';
@@ -32,7 +33,7 @@ r.delete('/quote-templates/:id', requireRole('office'), (req, res) => {
 });
 
 // ======================= QUOTES =======================
-const QUOTE_FIELDS = ['client_id', 'property_id', 'request_id', 'title', 'intro', 'discount', 'tax_rate', 'deposit', 'client_message', 'terms', 'valid_until', 'show_quantities', 'show_unit_prices', 'show_line_totals'];
+const QUOTE_FIELDS = ['client_id', 'property_id', 'request_id', 'title', 'intro', 'discount', 'tax_rate', 'deposit', 'client_message', 'terms', 'valid_until', 'show_quantities', 'show_unit_prices', 'show_line_totals', 'custom'];
 
 export function getQuote(id) {
   const q = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
@@ -42,6 +43,8 @@ export function getQuote(id) {
   q.items = getLineItems('quote', q.id);
   q.totals = computeTotals(q.items, q);
   q.jobs = db.prepare('SELECT id, number, title FROM jobs WHERE quote_id = ?').all(q.id);
+  q.milestones = getMilestones('quote', q.id);
+  parseCustom(q);
   return q;
 }
 
@@ -69,6 +72,7 @@ r.post('/quotes', requireRole('office'), (req, res) => {
       ...d, number: nextNumber('quote'), public_token: token(), created_by: req.user.id,
     });
     replaceLineItems('quote', qid, req.body.items);
+    if (req.body.milestones) replaceMilestones('quote', qid, req.body.milestones);
     if (d.request_id) db.prepare("UPDATE requests SET status = 'converted' WHERE id = ?").run(d.request_id);
     if (req.body.apply_terms_to_future && d.terms != null) setSettings({ quote_terms: d.terms });
     syncDeal({ clientId: d.client_id, quoteId: qid, requestId: d.request_id || null, stage: 'new', value: quoteValue(qid), title: d.title, userId: req.user.id });
@@ -84,6 +88,7 @@ r.put('/quotes/:id', requireRole('office'), (req, res) => {
   db.transaction(() => {
     update('quotes', q.id, d);
     if (req.body.items) replaceLineItems('quote', q.id, req.body.items);
+    if (req.body.milestones) replaceMilestones('quote', q.id, req.body.milestones);
     if (req.body.apply_terms_to_future && d.terms != null) setSettings({ quote_terms: d.terms });
     const dealStage = { approved: 'won', converted: 'won', sent: 'quote_sent', changes_requested: 'follow_up' }[d.status];
     syncDeal({ clientId: q.client_id, quoteId: q.id, requestId: q.request_id, stage: dealStage || 'new', value: quoteValue(q.id), title: d.title || q.title });
@@ -127,6 +132,7 @@ r.post('/quotes/:id/convert', requireRole('office'), (req, res) => {
       title: q.title, instructions: q.intro, start_date: today(),
     });
     copyLineItems('quote', q.id, 'job', jid, { onlySelected: true });
+    copyMilestones('quote', q.id, 'job', jid);
     DEFAULT_CHECKLIST.forEach((label, i) => insert('checklist_items', { job_id: jid, label, sort: i }));
     update('quotes', q.id, { status: 'converted', approved_at: q.approved_at || nowIso() });
     promoteLead(q.client_id);
@@ -142,13 +148,14 @@ r.post('/quotes/:id/duplicate', requireRole('office'), (req, res) => {
   const id = db.transaction(() => {
     const nid = insert('quotes', { ...pick(q, QUOTE_FIELDS), title: `${q.title} (copy)`, number: nextNumber('quote'), public_token: token(), created_by: req.user.id });
     copyLineItems('quote', q.id, 'quote', nid);
+    copyMilestones('quote', q.id, 'quote', nid);
     return nid;
   })();
   res.json({ id });
 });
 
 // ======================= JOBS =======================
-const JOB_FIELDS = ['client_id', 'property_id', 'quote_id', 'title', 'instructions', 'job_type', 'recurrence', 'billing', 'start_date', 'end_date', 'certificate_no'];
+const JOB_FIELDS = ['client_id', 'property_id', 'quote_id', 'title', 'instructions', 'job_type', 'recurrence', 'billing', 'start_date', 'end_date', 'certificate_no', 'custom'];
 
 function assignees(visitId) {
   return db.prepare('SELECT u.id, u.name, u.color FROM visit_assignments va JOIN users u ON u.id = va.user_id WHERE va.visit_id = ?').all(visitId);
@@ -171,6 +178,8 @@ export function getJob(id) {
   j.invoices = db.prepare('SELECT id, number, subject, status FROM invoices WHERE job_id = ?').all(j.id);
   j.quote = j.quote_id ? db.prepare('SELECT id, number, title FROM quotes WHERE id = ?').get(j.quote_id) : null;
   j.display_status = jobDisplayStatus(j);
+  j.milestones = getMilestones('job', j.id);
+  parseCustom(j);
   // job costing
   j.labour = db.prepare(`SELECT COALESCE(SUM((julianday(COALESCE(t.end_at, ?)) - julianday(t.start_at)) * 24), 0) hours,
       COALESCE(SUM((julianday(COALESCE(t.end_at, ?)) - julianday(t.start_at)) * 24 * u.hourly_cost), 0) cost
@@ -208,6 +217,7 @@ r.post('/jobs', requireRole('office'), (req, res) => {
   const id = db.transaction(() => {
     const jid = insert('jobs', { ...d, number: nextNumber('job'), start_date: d.start_date || today() });
     replaceLineItems('job', jid, req.body.items);
+    if (req.body.milestones) replaceMilestones('job', jid, req.body.milestones);
     for (const v of req.body.visits || []) createVisit(jid, v, d.title);
     (req.body.checklist || []).forEach((label, i) => label && insert('checklist_items', { job_id: jid, label, sort: i }));
     if (req.body.request_id) {
@@ -229,6 +239,7 @@ r.put('/jobs/:id', requireRole('office'), (req, res) => {
     if (d.status === 'active') d.completed_at = null;
     update('jobs', j.id, d);
     if (req.body.items) replaceLineItems('job', j.id, req.body.items);
+    if (req.body.milestones) replaceMilestones('job', j.id, req.body.milestones);
     if (d.status && d.status !== j.status) logActivity({ userId: req.user.id, entityType: 'job', entityId: j.id, clientId: j.client_id, action: d.status, summary: `Job #${j.number} marked ${d.status}` });
   })();
   res.json({ ok: true });
@@ -243,6 +254,38 @@ r.post('/jobs/:id/complete', (req, res) => {
     logActivity({ userId: req.user.id, entityType: 'job', entityId: j.id, clientId: j.client_id, action: 'completed', summary: `Job #${j.number} completed` });
   })();
   res.json({ ok: true });
+});
+
+/** Replace a job's payment schedule (invoices already raised stay linked). */
+r.put('/jobs/:id/milestones', requireRole('office'), (req, res) => {
+  const j = getJob(req.params.id);
+  replaceMilestones('job', j.id, req.body.milestones || []);
+  res.json({ ok: true, milestones: getMilestones('job', j.id) });
+});
+
+/** Raise the invoice for one payment in a job's schedule. */
+r.post('/jobs/:id/milestones/:mid/invoice', requireRole('office'), (req, res) => {
+  const j = getJob(req.params.id);
+  const m = j.milestones.find((x) => x.id === Number(req.params.mid));
+  if (!m) throw notFound('Scheduled payment');
+  if (m.invoice) throw bad(`Invoice #${m.invoice.number} has already been raised for this payment`);
+  if (!(m.amount > 0)) throw bad("This payment comes to zero. Check the job's line items or the schedule.");
+  const s = getSettings();
+  const id = db.transaction(() => {
+    const issue = today();
+    const due = m.due_date && m.due_date > issue ? m.due_date : addDays(issue, s.invoice_terms_days || 14);
+    const share = m.kind === 'percent' ? `${m.value}% of ` : m.kind === 'remainder' ? 'balance of ' : '';
+    const iid = insert('invoices', {
+      number: nextNumber('invoice'), client_id: j.client_id, property_id: j.property?.id || null, job_id: j.id,
+      subject: `${m.label} – ${j.title}`, issue_date: issue, due_date: due, tax_rate: Number(s.tax_rate) || 0,
+      client_message: s.invoice_message, terms: s.invoice_terms, public_token: token(),
+    });
+    replaceLineItems('invoice', iid, [{ name: m.label, description: `${share}job #${j.number} ${j.title}`, quantity: 1, unit_price: m.amount }]);
+    db.prepare('UPDATE payment_milestones SET invoice_id = ? WHERE id = ?').run(iid, m.id);
+    logActivity({ userId: req.user.id, entityType: 'invoice', entityId: iid, clientId: j.client_id, action: 'created', summary: `Invoice for "${m.label}" raised on job #${j.number}` });
+    return iid;
+  })();
+  res.json({ id });
 });
 
 r.delete('/jobs/:id', requireRole('admin'), (req, res) => {

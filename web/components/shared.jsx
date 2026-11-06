@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Trash2, GripVertical, Search, FileText, Paperclip, X, Type } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Search, FileText, Paperclip, X, Type, ImagePlus, Eye, EyeOff, Settings2 } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { money, ago, date } from '../format.js';
-import { useLoad, useAction, Field, Modal, useDebounced, useApp, askConfirm } from './ui.jsx';
+import { useLoad, useAction, Field, Modal, useDebounced, useApp, askConfirm, isOffice, useToast } from './ui.jsx';
+import { Link } from 'react-router-dom';
 
 // ===================== totals =====================
 export function computeTotals(items, { discount = 0, tax_rate = 0 } = {}) {
@@ -18,6 +19,41 @@ export function computeTotals(items, { discount = 0, tax_rate = 0 } = {}) {
 }
 
 // ===================== line items editor =====================
+/** Shrinks a photo in the browser and returns a small JPEG data URL (kept with the line item or product). */
+export function resizeImage(file, max = 480) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith('image/')) return reject(new Error('Choose an image file'));
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.8));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That image could not be read')); };
+    img.src = url;
+  });
+}
+
+/** Small photo slot: shows the picture, lets you add, change or remove it. */
+export function PhotoSlot({ value, onChange, size = 56, label = 'Add photo' }) {
+  const input = useRef();
+  const toast = useToast();
+  const pick = (f) => f && resizeImage(f).then(onChange).catch((e) => toast(e.message, 'error'));
+  return (
+    <div className="photo-slot" style={{ width: size, height: size }}>
+      {value ? (<>
+        <img src={value} alt="" onClick={() => input.current.click()} />
+        <button type="button" className="x" aria-label="Remove photo" onClick={() => onChange(null)}><X size={12} /></button>
+      </>) : <button type="button" className="add" onClick={() => input.current.click()} title={label} aria-label={label}><ImagePlus size={18} /></button>}
+      <input ref={input} type="file" accept="image/*" hidden onChange={(e) => { pick(e.target.files[0]); e.target.value = ''; }} />
+    </div>
+  );
+}
+
 const blank = () => ({ key: Math.random(), name: '', description: '', quantity: 1, unit_price: 0, unit_cost: 0, optional: 0, selected: 1 });
 
 export function LineItemsEditor({ items, onChange, allowOptional, showCost = true }) {
@@ -33,11 +69,12 @@ export function LineItemsEditor({ items, onChange, allowOptional, showCost = tru
     <div>
       <div className="table-wrap">
         <table className="li-table">
-          <thead><tr><th style={{ width: 18 }} /><th>Product / Service</th><th style={{ width: 80 }} className="right">Qty</th><th style={{ width: 110 }} className="right">Unit price</th>{showCost && <th style={{ width: 100 }} className="right hide-sm">Unit cost</th>}<th style={{ width: 110 }} className="right">Total</th><th style={{ width: 36 }} /></tr></thead>
+          <thead><tr><th style={{ width: 18 }} /><th style={{ width: 64 }}><span className="sr-only">Photo</span></th><th>Product / Service</th><th style={{ width: 80 }} className="right">Qty</th><th style={{ width: 110 }} className="right">Unit price</th>{showCost && <th style={{ width: 100 }} className="right hide-sm">Unit cost</th>}<th style={{ width: 110 }} className="right">Total</th><th style={{ width: 36 }} /></tr></thead>
           <tbody>
             {rows.map((it, i) => (
               <tr key={it.key} className="li-row" draggable onDragStart={() => (drag.current = i)} onDragOver={(e) => e.preventDefault()} onDrop={() => { move(drag.current, i); drag.current = null; }}>
                 <td style={{ paddingTop: 12, cursor: 'grab' }} className="faint"><GripVertical size={14} /></td>
+                <td style={{ width: 64 }}>{!it.is_text && <PhotoSlot value={it.image} onChange={(image) => set(i, { image })} />}</td>
                 <td>
                   {it.is_text ? (
                     <textarea placeholder="Text / heading shown on the document" value={it.name} onChange={(e) => set(i, { name: e.target.value })} style={{ marginTop: 0 }} />
@@ -74,7 +111,7 @@ export function LineItemsEditor({ items, onChange, allowOptional, showCost = tru
       </div>
       {pickerFor !== null && (
         <ProductPicker products={products || []} onClose={() => setPickerFor(null)} onPick={(p) => {
-          const patch = { product_id: p.id, name: p.name, description: p.description, unit_price: p.unit_price, unit_cost: p.unit_cost };
+          const patch = { product_id: p.id, name: p.name, description: p.description, unit_price: p.unit_price, unit_cost: p.unit_cost, image: p.image || null };
           if (pickerFor === 'new') onChange([...rows, { ...blank(), ...patch }]); else set(pickerFor, patch);
           setPickerFor(null);
         }} />
@@ -93,6 +130,7 @@ function ProductPicker({ products, onPick, onClose }) {
         {list.map((p) => (
           <li key={p.id}>
             <button type="button" className="row" style={{ width: '100%', background: 'none', border: 0, textAlign: 'left', cursor: 'pointer', padding: 0 }} onClick={() => onPick(p)}>
+              {p.image ? <img src={p.image} alt="" className="thumb" /> : <span className="thumb" />}
               <div style={{ flex: 1, minWidth: 0 }}><div className="strong">{p.name}</div><div className="small muted" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.description}</div></div>
               <div className="strong">{money(p.unit_price)}</div>
             </button>
@@ -197,6 +235,7 @@ export function ClientFormModal({ client, onClose, onSaved }) {
           <Field label="Postcode / Eircode"><input value={f.property.postcode} onChange={setP('postcode')} /></Field>
           <Field label="Country"><input value={f.property.country} onChange={setP('country')} /></Field>
         </>)}
+        <CustomFieldsEditor entity="client" value={f.custom} onChange={(custom) => setF({ ...f, custom })} />
         <Field label="Notes" full><textarea value={f.notes || ''} onChange={set('notes')} /></Field>
       </div>
     </Modal>
@@ -251,6 +290,12 @@ export function Attachments({ type, id, title = 'Files & photos' }) {
               <div className="file" key={a.id}>
                 <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer">{a.mime?.startsWith('image/') ? <img src={`/api/files/${a.id}`} alt={a.filename} /> : <div className="ph"><FileText size={28} /></div>}</a>
                 <div className="nm" title={a.filename}>{a.filename}</div>
+                {['quote', 'invoice'].includes(type) && (
+                  <button type="button" className={`vis${a.client_visible ? ' on' : ''}`} title={a.client_visible ? 'Shown on the client\'s copy. Click to hide.' : 'Hidden from the client. Click to show.'}
+                    onClick={() => run(() => api.put(`/attachments/${a.id}`, { client_visible: !a.client_visible }), a.client_visible ? 'Hidden from client' : 'Shown to client').then(reload).catch(() => {})}>
+                    {a.client_visible ? <Eye size={12} /> : <EyeOff size={12} />} {a.client_visible ? 'Client sees' : 'Internal'}
+                  </button>
+                )}
                 <button className="x" aria-label="Delete file" onClick={() => askConfirm(`Delete ${a.filename}?`).then((ok) => ok && run(() => api.del(`/attachments/${a.id}`)).then(reload).catch(() => {}))}><X size={13} /></button>
               </div>
             ))}
@@ -314,7 +359,7 @@ export function DocLines({ items, showOptional = true }) {
             <tr key={it.id}><td colSpan={4} className="pre strong">{it.name}</td></tr>
           ) : (
             <tr key={it.id} style={{ opacity: it.optional && !it.selected ? 0.55 : 1 }}>
-              <td><div className="strong">{it.name} {showOptional && !!it.optional && <span className="badge" style={{ marginLeft: 6 }}>{it.selected ? 'Optional · included' : 'Optional'}</span>}</div>{it.description && <div className="small muted pre">{it.description}</div>}</td>
+              <td><div className="row" style={{ alignItems: 'flex-start', gap: 12 }}>{it.image && <img src={it.image} alt="" className="li-photo" />}<div><div className="strong">{it.name} {showOptional && !!it.optional && <span className="badge" style={{ marginLeft: 6 }}>{it.selected ? 'Optional · included' : 'Optional'}</span>}</div>{it.description && <div className="small muted pre">{it.description}</div>}</div></div></td>
               <td className="num">{it.quantity}</td><td className="num">{money(it.unit_price)}</td><td className="num strong">{money(it.quantity * it.unit_price)}</td>
             </tr>
           ))}
@@ -327,3 +372,102 @@ export function DocLines({ items, showOptional = true }) {
 
 export function useClient(id) { return useLoad(id ? `/clients/${id}` : null); }
 export { date };
+
+// ===================== custom fields =====================
+/** Inputs for the custom fields defined for a record type (Settings → Custom fields). */
+export function CustomFieldsEditor({ entity, value = {}, onChange }) {
+  const { user } = useApp();
+  const { data: fields, reload } = useLoad(`/custom-fields?entity=${entity}`);
+  const [adding, setAdding] = useState(false);
+  if (!fields) return null;
+  const set = (id, v) => onChange({ ...(value || {}), [id]: v });
+  return (
+    <div className="full">
+      {!!fields.length && <div className="form-grid">
+        {fields.map((f) => {
+          const v = (value || {})[f.id];
+          if (f.field_type === 'checkbox') return <label key={f.id} className="check" style={{ alignSelf: 'end' }}><input type="checkbox" checked={!!v} onChange={(e) => set(f.id, e.target.checked)} /> {f.label}</label>;
+          if (f.field_type === 'select') return <Field key={f.id} label={f.label}><select value={v ?? ''} onChange={(e) => set(f.id, e.target.value)}><option value="">—</option>{f.options.map((o) => <option key={o}>{o}</option>)}</select></Field>;
+          return <Field key={f.id} label={f.label}><input type={f.field_type === 'number' ? 'number' : f.field_type === 'date' ? 'date' : 'text'} value={v ?? ''} onChange={(e) => set(f.id, e.target.value)} /></Field>;
+        })}
+      </div>}
+      {isOffice(user) && <button type="button" className="link small mt-s" onClick={() => setAdding(true)}><Plus size={13} style={{ verticalAlign: -2 }} /> Add a custom field</button>}
+      {adding && <CustomFieldModal entity={entity} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); reload(); }} />}
+    </div>
+  );
+}
+
+/** Read-only list of a record's custom field values. */
+export function CustomFieldsView({ entity, value }) {
+  const { data: fields } = useLoad(`/custom-fields?entity=${entity}`);
+  if (!fields?.length) return null;
+  const shown = fields.filter((f) => value && value[f.id] !== undefined && value[f.id] !== '' && value[f.id] !== null);
+  if (!shown.length) return null;
+  return (<>{shown.map((f) => <React.Fragment key={f.id}><dt>{f.label}</dt><dd>{f.field_type === 'checkbox' ? (value[f.id] ? 'Yes' : 'No') : f.field_type === 'date' ? date(value[f.id]) : String(value[f.id])}</dd></React.Fragment>)}</>);
+}
+
+export const ENTITY_LABELS = { client: 'Clients', request: 'Requests', quote: 'Quotes', job: 'Jobs', invoice: 'Invoices' };
+export function CustomFieldModal({ field, entity, onClose, onSaved }) {
+  const [f, setF] = useState(field ? { ...field, options: (field.options || []).join(', ') } : { entity: entity || 'job', label: '', field_type: 'text', options: '', show_to_client: 0 });
+  const [run, busy] = useAction();
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  return (
+    <Modal title={field ? 'Edit custom field' : 'New custom field'} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={busy} onClick={() => run(() => field ? api.put(`/custom-fields/${field.id}`, f) : api.post('/custom-fields', f), 'Custom field saved').then(onSaved).catch(() => {})}>Save field</button></>}>
+      <div className="form-grid">
+        <Field label="Field name" full><input value={f.label} onChange={set('label')} autoFocus placeholder="e.g. MPRN, Board location, Certificate type" /></Field>
+        <Field label="Appears on"><select value={f.entity} onChange={set('entity')} disabled={!!entity && !field}>{Object.entries(ENTITY_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></Field>
+        <Field label="Type"><select value={f.field_type} onChange={set('field_type')}><option value="text">Text</option><option value="number">Number</option><option value="date">Date</option><option value="select">Dropdown</option><option value="checkbox">Yes / no</option></select></Field>
+        {f.field_type === 'select' && <Field label="Options (comma separated)" full><input value={f.options} onChange={set('options')} placeholder="e.g. Single phase, Three phase" /></Field>}
+        {['quote', 'invoice'].includes(f.entity) && <label className="check full"><input type="checkbox" checked={!!f.show_to_client} onChange={(e) => setF({ ...f, show_to_client: e.target.checked ? 1 : 0 })} /> Show on the client's copy</label>}
+      </div>
+    </Modal>
+  );
+}
+
+// ===================== payment schedules =====================
+const MS_PRESETS = [
+  ['Deposit 30% · balance on completion', [['Deposit', 'percent', 30], ['Balance on completion', 'remainder', 0]]],
+  ['50 / 50', [['Deposit', 'percent', 50], ['Balance on completion', 'remainder', 0]]],
+  ['30 / 40 / 30 (first fix, second fix)', [['Deposit', 'percent', 30], ['First fix complete', 'percent', 40], ['Final balance', 'remainder', 0]]],
+];
+/** Edit a list of scheduled payments: % of the total, a fixed amount, or "the remaining balance". */
+export function MilestonesEditor({ value = [], onChange, base, taxRate = 0 }) {
+  const rows = value.map((m) => (m.key ? m : { ...m, key: m.id || Math.random() }));
+  const set = (i, patch) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const fixed = rows.filter((m) => m.kind !== 'remainder').reduce((s, m) => s + (m.kind === 'percent' ? (base * (Number(m.value) || 0)) / 100 : Number(m.value) || 0), 0);
+  const amountOf = (m) => (m.kind === 'percent' ? (base * (Number(m.value) || 0)) / 100 : m.kind === 'amount' ? Number(m.value) || 0 : Math.max(0, base - fixed));
+  const total = rows.reduce((s, m) => s + amountOf(m), 0);
+  const hasRemainder = rows.some((m) => m.kind === 'remainder');
+  return (
+    <div>
+      {!rows.length && (
+        <div className="row wrap" style={{ gap: 8 }}>
+          <span className="small muted">Start from:</span>
+          {MS_PRESETS.map(([label, list]) => <button key={label} type="button" className="chip" onClick={() => onChange(list.map(([l, kind, v]) => ({ label: l, kind, value: v, due_date: '', key: Math.random() })))}>{label}</button>)}
+        </div>
+      )}
+      {!!rows.length && (
+        <div className="table-wrap"><table className="li-table">
+          <thead><tr><th>Payment</th><th style={{ width: 150 }}>Type</th><th style={{ width: 100 }} className="right">Value</th><th style={{ width: 150 }}>Due</th><th style={{ width: 120 }} className="right">Amount</th><th style={{ width: 36 }} /></tr></thead>
+          <tbody>{rows.map((m, i) => (
+            <tr key={m.key} className="li-row">
+              <td><input value={m.label} onChange={(e) => set(i, { label: e.target.value })} aria-label="Payment name" disabled={!!m.invoice} /></td>
+              <td><select className="input" value={m.kind} onChange={(e) => set(i, { kind: e.target.value })} disabled={!!m.invoice}><option value="percent">% of total</option><option value="amount">Fixed amount</option><option value="remainder" disabled={hasRemainder && m.kind !== 'remainder'}>Remaining balance</option></select></td>
+              <td className="num">{m.kind === 'remainder' ? <span className="muted small">—</span> : <input type="number" step="0.01" value={m.value} onChange={(e) => set(i, { value: e.target.value })} aria-label="Value" disabled={!!m.invoice} />}</td>
+              <td><input type="date" value={m.due_date || ''} onChange={(e) => set(i, { due_date: e.target.value })} aria-label="Due date" /></td>
+              <td className="num" style={{ paddingTop: 13 }}><b>{money(amountOf(m))}</b>{taxRate > 0 && <div className="small faint">{money(amountOf(m) * (1 + taxRate / 100))} incl. tax</div>}</td>
+              <td>{!m.invoice && <button type="button" className="btn ghost icon" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label="Remove payment"><Trash2 size={15} /></button>}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+      <div className="row mt-s wrap">
+        <button type="button" className="btn sm" onClick={() => onChange([...rows, { label: rows.length ? 'Progress payment' : 'Deposit', kind: 'percent', value: rows.length ? 0 : 30, due_date: '', key: Math.random() }])}><Plus size={14} /> Add payment</button>
+        {!!rows.length && <button type="button" className="btn sm ghost" onClick={() => onChange(rows.filter((m) => m.invoice))}>Clear</button>}
+        <span className="spacer" />
+        {!!rows.length && <span className={`small ${Math.abs(total - base) > 0.01 ? 'overdue' : 'muted'}`}>Scheduled {money(total)} of {money(base)} (before tax){Math.abs(total - base) > 0.01 ? ' · doesn\'t add up to the total' : ''}</span>}
+      </div>
+    </div>
+  );
+}

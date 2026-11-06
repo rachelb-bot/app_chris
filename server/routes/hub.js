@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { db, getSettings, logActivity } from '../db.js';
-import { bad, notFound, insert, update, nowIso, getLineItems, computeTotals, formatAddress, clientName, invoiceTotals, invoiceDisplayStatus } from '../lib.js';
+import { bad, notFound, insert, update, nowIso, getLineItems, computeTotals, formatAddress, clientName, invoiceTotals, invoiceDisplayStatus, getMilestones } from '../lib.js';
+import path from 'node:path';
+import { UPLOAD_DIR } from '../db.js';
 import { promoteLead } from './crm.js';
 import { syncDeal, quoteValue } from './pipeline.js';
 import { sendEmail } from '../mailer.js';
@@ -18,7 +20,17 @@ function clientInfo(clientId, propertyId) {
   const p = (propertyId && db.prepare('SELECT * FROM properties WHERE id = ?').get(propertyId)) || db.prepare('SELECT * FROM properties WHERE client_id = ? LIMIT 1').get(clientId);
   return { name: clientName(c), email: c.email, phone: c.phone, address: formatAddress(p) };
 }
-const publicItems = (items) => items.map(({ id, name, description, quantity, unit_price, optional, selected, is_text }) => ({ id, name, description, quantity, unit_price, optional, selected, is_text }));
+const publicItems = (items) => items.map(({ id, name, description, quantity, unit_price, optional, selected, is_text, image }) => ({ id, name, description, quantity, unit_price, optional, selected, is_text, image }));
+
+/** Custom fields marked "show to client", as label/value pairs. */
+function publicCustom(entity, raw) {
+  let values = {};
+  try { values = JSON.parse(raw || '{}'); } catch { /* ignore */ }
+  return db.prepare('SELECT * FROM custom_fields WHERE entity = ? AND show_to_client = 1 AND active = 1 ORDER BY sort, id').all(entity)
+    .map((f) => ({ label: f.label, type: f.field_type, value: values[f.id] }))
+    .filter((f) => f.value !== undefined && f.value !== null && f.value !== '' && f.value !== false);
+}
+const publicFiles = (type, id) => db.prepare('SELECT id, filename, mime, size FROM attachments WHERE parent_type = ? AND parent_id = ? AND client_visible = 1 ORDER BY created_at').all(type, id);
 
 function quoteByToken(t) {
   const q = db.prepare('SELECT * FROM quotes WHERE public_token = ?').get(t);
@@ -35,6 +47,8 @@ r.get('/hub/quote/:token', (req, res) => {
       client_message: q.client_message, deposit: q.deposit, discount: q.discount, tax_rate: q.tax_rate, approved_at: q.approved_at, client_signature: q.client_signature,
       show_quantities: q.show_quantities, show_unit_prices: q.show_unit_prices, show_line_totals: q.show_line_totals },
     items: publicItems(items), totals: computeTotals(items, q),
+    milestones: getMilestones('quote', q.id).map(({ label, kind, value, due_date, amount }) => ({ label, kind, value, due_date, amount })),
+    custom: publicCustom('quote', q.custom), files: publicFiles('quote', q.id),
   });
 });
 
@@ -81,7 +95,21 @@ r.get('/hub/invoice/:token', (req, res) => {
       show_quantities: inv.show_quantities, show_unit_prices: inv.show_unit_prices, show_line_totals: inv.show_line_totals },
     items: publicItems(items), totals,
     payments: db.prepare('SELECT amount, method, paid_on FROM payments WHERE invoice_id = ? ORDER BY paid_on').all(inv.id),
+    custom: publicCustom('invoice', inv.custom), files: publicFiles('invoice', inv.id),
   });
+});
+
+/** Download a file the office chose to share on a quote or invoice. */
+r.get('/hub/:kind/:token/files/:fid', (req, res) => {
+  const table = req.params.kind === 'quote' ? 'quotes' : req.params.kind === 'invoice' ? 'invoices' : null;
+  if (!table) throw notFound('File');
+  const doc = db.prepare(`SELECT id, status FROM ${table} WHERE public_token = ?`).get(req.params.token);
+  if (!doc || doc.status === 'draft') throw notFound('File');
+  const a = db.prepare('SELECT * FROM attachments WHERE id = ? AND parent_type = ? AND parent_id = ? AND client_visible = 1').get(req.params.fid, req.params.kind, doc.id);
+  if (!a) throw notFound('File');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(a.filename)}"`);
+  res.type(a.mime || 'application/octet-stream');
+  res.sendFile(path.join(UPLOAD_DIR, a.stored_name));
 });
 
 /** Public "request work" form, e.g. linked from the company website. */

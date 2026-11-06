@@ -5,20 +5,24 @@ import { api, qs } from '../api.js';
 import { money, date, dateTime, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useToast, useApp } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient, ClientViewOptions } from '../components/shared.jsx';
+import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient, ClientViewOptions, CustomFieldsEditor, CustomFieldsView, MilestonesEditor, computeTotals } from '../components/shared.jsx';
+import { DocImportModal } from '../components/Import.jsx';
+import { Upload } from 'lucide-react';
 
 export function QuotesList() {
   const [params, setParams] = useSearchParams();
   const status = params.get('status') || '';
   const [q, setQ] = useState('');
   const dq = useDebounced(q);
-  const { data, loading } = useLoad(`/quotes${qs({ status, q: dq })}`);
-  const { data: all } = useLoad('/quotes?status=all');
+  const { data, loading, reload } = useLoad(`/quotes${qs({ status, q: dq })}`);
+  const { data: all, reload: reloadAll } = useLoad('/quotes?status=all');
   const nav = useNavigate();
+  const [importing, setImporting] = useState(false);
   const sum = (s) => (all || []).filter((x) => x.status === s);
   return (
     <div>
       <PageHead title="Quotes">
+        <button className="btn" onClick={() => setImporting(true)}><Upload size={15} /> Import</button>
         <Link className="btn" to="/quotes/new?template=1"><LayoutTemplate size={15} /> Use a template</Link>
         <Link className="btn primary" to="/quotes/new"><Plus size={16} /> New quote</Link>
       </PageHead>
@@ -49,6 +53,7 @@ export function QuotesList() {
           Start from an electrical template or create a quote manually. Clients can approve quotes online.
         </Empty>}
       </div>
+      {importing && <DocImportModal kind="quotes" onClose={() => setImporting(false)} onDone={() => { setImporting(false); reload(); reloadAll(); }} />}
     </div>
   );
 }
@@ -126,11 +131,17 @@ export function QuoteForm() {
           <div className="mt"><TotalsEditor items={f.items} discount={f.discount} tax_rate={f.tax_rate} deposit={f.deposit} showDeposit onChange={(p) => setF({ ...f, ...p })} /></div>
         </div>
         <div className="card card-pad">
+          <div className="section-title">Payment schedule</div>
+          <p className="small muted mb">Optional. Split the price into a deposit and stage payments. The schedule is shown to the client and carries over to the job, where each payment becomes its own invoice.</p>
+          {(() => { const t = computeTotals(f.items, f); return <MilestonesEditor value={f.milestones || []} onChange={(milestones) => setF({ ...f, milestones })} base={t.subtotal - t.discount} taxRate={Number(f.tax_rate) || 0} />; })()}
+        </div>
+        <div className="card card-pad">
           <div className="form-grid">
             <Field label="Client message" full><textarea value={f.client_message || ''} onChange={set('client_message')} placeholder="Shown on the quote" /></Field>
             <Field label="Contract / disclaimer" full><textarea rows={4} value={f.terms || ''} onChange={set('terms')} /></Field>
             <label className="check small full"><input type="checkbox" checked={!!f.apply_terms_to_future} onChange={(e) => setF({ ...f, apply_terms_to_future: e.target.checked })} /> Apply this contract / disclaimer to all future quotes</label>
             <ClientViewOptions value={f} onChange={(p) => setF({ ...f, ...p })} />
+            <CustomFieldsEditor entity="quote" value={f.custom} onChange={(custom) => setF({ ...f, custom })} />
             <Field label="Valid until"><input type="date" value={f.valid_until || ''} onChange={set('valid_until')} /></Field>
           </div>
         </div>
@@ -228,6 +239,13 @@ export function QuoteDetail() {
             <DocLines items={q.items} />
             {(!q.show_quantities || !q.show_unit_prices || !q.show_line_totals) && <div className="card-pad small muted" style={{ paddingTop: 0 }}>Hidden from the client: {[!q.show_quantities && 'quantities', !q.show_unit_prices && 'unit prices', !q.show_line_totals && 'line totals'].filter(Boolean).join(', ')}</div>}
             <div className="card-pad"><TotalsEditor items={q.items} discount={q.discount} tax_rate={q.tax_rate} deposit={q.deposit} showDeposit={q.deposit > 0} readOnly /></div>
+            {!!q.milestones?.length && (
+              <div className="card-pad" style={{ borderTop: '1px solid var(--border)' }}>
+                <div className="section-title">Payment schedule</div>
+                {q.milestones.map((m) => <div key={m.id} className="row mt-s"><span>{m.label}{m.kind === 'percent' ? ` (${m.value}%)` : ''}</span>{m.due_date && <span className="small muted">due {date(m.due_date)}</span>}<span className="spacer" /><b>{money(m.amount * (1 + q.tax_rate / 100))}</b></div>)}
+              </div>
+            )}
+            {(() => { const v = <CustomFieldsView entity="quote" value={q.custom} />; return <div className="card-pad" style={{ paddingTop: 0 }}><dl className="kv">{v}</dl></div>; })()}
             {(q.client_message || q.terms) && <div className="card-pad small muted pre" style={{ borderTop: '1px solid var(--border)' }}>{[q.client_message, q.terms].filter(Boolean).join('\n\n')}</div>}
           </div>
           <Attachments type="quote" id={q.id} />

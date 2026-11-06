@@ -339,6 +339,43 @@ const migrations = [
   ALTER TABLE time_entries ADD COLUMN paid_at TEXT;
   ALTER TABLE expenses ADD COLUMN reimbursed_at TEXT;
   `,
+  // 3 — line item photos, map coordinates, client-visible files, custom fields, payment schedules
+  `
+  ALTER TABLE products ADD COLUMN image TEXT;
+  ALTER TABLE line_items ADD COLUMN image TEXT;
+  ALTER TABLE properties ADD COLUMN lat REAL;
+  ALTER TABLE properties ADD COLUMN lng REAL;
+  ALTER TABLE properties ADD COLUMN geocoded_at TEXT;
+  ALTER TABLE attachments ADD COLUMN client_visible INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE clients ADD COLUMN custom TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE requests ADD COLUMN custom TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE quotes ADD COLUMN custom TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE jobs ADD COLUMN custom TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE invoices ADD COLUMN custom TEXT NOT NULL DEFAULT '{}';
+  CREATE TABLE custom_fields (
+    id INTEGER PRIMARY KEY,
+    entity TEXT NOT NULL CHECK (entity IN ('client','request','quote','job','invoice')),
+    label TEXT NOT NULL,
+    field_type TEXT NOT NULL DEFAULT 'text' CHECK (field_type IN ('text','number','date','select','checkbox')),
+    options TEXT NOT NULL DEFAULT '[]',
+    show_to_client INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE payment_milestones (
+    id INTEGER PRIMARY KEY,
+    parent_type TEXT NOT NULL CHECK (parent_type IN ('quote','job')),
+    parent_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'percent' CHECK (kind IN ('percent','amount','remainder')),
+    value REAL NOT NULL DEFAULT 0,
+    due_date TEXT,
+    invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+    sort INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX payment_milestones_parent ON payment_milestones(parent_type, parent_id);
+  `,
 ];
 
 export function migrate() {

@@ -5,7 +5,8 @@ import { api, qs } from '../api.js';
 import { money, date, ago, ymd, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Modal, Field, Dropdown, Chips, Confirm, useDebounced, useApp, isOffice, isAdmin, Delta, useToast } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { ClientFormModal, Notes, Attachments, Activity } from '../components/shared.jsx';
+import { ClientFormModal, Notes, Attachments, Activity, CustomFieldsView } from '../components/shared.jsx';
+import { parseCsv } from '../components/Import.jsx';
 
 export function ClientsList() {
   const { user } = useApp();
@@ -93,19 +94,6 @@ export function ClientsList() {
 }
 
 // ---------- CSV import ----------
-function parseCsv(text) {
-  const rows = []; let row = [], cell = '', q = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (q) { if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') q = false; else cell += ch; }
-    else if (ch === '"') q = true;
-    else if (ch === ',' || ch === ';' && !text.slice(0, 2000).includes(',')) { row.push(cell); cell = ''; }
-    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
-    else cell += ch;
-  }
-  if (cell || row.length) { row.push(cell); rows.push(row); }
-  return rows.filter((r) => r.some((c) => c.trim()));
-}
 const HEADER_MAP = {
   first_name: ['firstname', 'first', 'givenname', 'forename'], last_name: ['lastname', 'last', 'surname', 'familyname'],
   company_name: ['company', 'companyname', 'business', 'organisation', 'organization'], email: ['email', 'emailaddress', 'mail'],
@@ -289,6 +277,7 @@ export function ClientDetail() {
               <dt>Phone</dt><dd>{c.phone ? <a href={`tel:${c.phone}`} className="row" style={{ gap: 6 }}><Phone size={14} />{c.phone}</a> : '—'}</dd>
               <dt>Lead source</dt><dd>{c.lead_source || '—'}</dd>
               <dt>Client since</dt><dd>{date(c.created_at)}</dd>
+              <CustomFieldsView entity="client" value={c.custom} />
             </dl>
             {c.notes && <p className="pre muted mt small">{c.notes}</p>}
           </div>

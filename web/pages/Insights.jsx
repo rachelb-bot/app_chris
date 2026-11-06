@@ -5,6 +5,8 @@ import { money, date, ymd } from '../format.js';
 import { useLoad, Loading, Delta, Field, Chips, Seg } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { BarChart, HBars } from '../components/shared.jsx';
+import RevenueMap from '../components/RevenueMap.jsx';
+import { useAction } from '../components/ui.jsx';
 
 const presets = () => {
   const t = new Date();
@@ -22,6 +24,7 @@ export default function Insights() {
   const [preset, setPreset] = useState('month');
   const [range, setRange] = useState(presets().month);
   const [plView, setPlView] = useState('completed');
+  const [run, busy] = useAction();
   const { data: d } = useLoad(`/insights${qs(range)}`);
   const nav = useNavigate();
   const pick = (p) => { setPreset(p); if (p !== 'custom') setRange(presets()[p]); };
@@ -51,6 +54,13 @@ export default function Insights() {
           <div className="card card-pad">
             <div className="row"><h2>Revenue</h2><span className="muted small">Payments received, last 12 months</span><span className="spacer" /><b>{money(d.revenue.reduce((s, r) => s + r.amount, 0))}</b></div>
             <BarChart data={d.revenue} label={(r) => date(r.month + '-01', { month: 'short' })} value={(r) => r.amount} highlightLast />
+          </div>
+
+          <div className="card card-pad">
+            <div className="row wrap"><div><h2>Revenue map</h2><div className="muted small">Payments received in period, by property</div></div><span className="spacer" />
+              {d.revenueMap.missing > 0 && d.revenueMap.geocoding && <button className="btn sm" disabled={busy} onClick={() => run(() => api.post('/geocode/missing'), `Looking up ${d.revenueMap.missing} addresses. Refresh in a minute.`)}>Locate {d.revenueMap.missing} addresses</button>}</div>
+            <div className="mt"><RevenueMap points={d.revenueMap.points} onOpen={(p) => nav(`/clients/${p.client_id}`)} /></div>
+            {d.revenueMap.unmapped > 0 && <div className="small muted mt-s">{money(d.revenueMap.unmapped)} received from clients without a map position{d.revenueMap.geocoding ? '' : ' (address lookup is switched off on this server)'}.</div>}
           </div>
 
           <div className="grid g3">

@@ -4,6 +4,7 @@ import { requireRole, isOffice } from '../auth.js';
 import { bad, notFound, pick, insert, update, clientName, today, addDays, nowIso, round2,
   getLineItems, computeTotals, invoiceTotals, invoiceDisplayStatus, jobDisplayStatus } from '../lib.js';
 import { sendEmail } from '../mailer.js';
+import { queueMissing, geocodingEnabled } from '../geocode.js';
 
 const r = Router();
 const office = requireRole('office');
@@ -183,8 +184,32 @@ r.get('/insights', office, (req, res) => {
     conversion_rate: sent.length ? Math.round((won.length / sent.length) * 100) : null,
   };
 
-  res.json({ from, to, overview, revenue, pl, cashflow, conversion, jobs: jobsSection, sources, revenueBySource, revenueByArea, paymentMethods, quotes });
+  // revenue map: payments in range, per property with coordinates
+  const mapRows = db.prepare(`SELECT p.amount, c.id client_id, c.first_name, c.last_name, c.company_name,
+      pr.id property_id, pr.street, pr.city, pr.lat, pr.lng
+    FROM payments p JOIN invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id
+    LEFT JOIN properties pr ON pr.id = COALESCE(i.property_id, (SELECT id FROM properties WHERE client_id = c.id ORDER BY id LIMIT 1))
+    WHERE p.paid_on >= ? AND p.paid_on <= ?`).all(from, to);
+  const points = {};
+  let unmapped = 0;
+  for (const x of mapRows) {
+    if (x.lat == null) { unmapped += x.amount; continue; }
+    const k = x.property_id;
+    points[k] ||= { lat: x.lat, lng: x.lng, client_id: x.client_id, client_name: clientName(x), address: [x.street, x.city].filter(Boolean).join(', '), value: 0 };
+    points[k].value = round2(points[k].value + x.amount);
+  }
+  const revenueMap = {
+    points: Object.values(points).sort((a, b) => b.value - a.value),
+    unmapped: round2(unmapped),
+    missing: db.prepare("SELECT COUNT(*) c FROM properties WHERE lat IS NULL AND COALESCE(street, city, postcode, '') != ''").get().c,
+    geocoding: geocodingEnabled(),
+  };
+
+  res.json({ from, to, overview, revenue, pl, cashflow, conversion, jobs: jobsSection, sources, revenueBySource, revenueByArea, paymentMethods, quotes, revenueMap });
 });
+
+/** Look up map positions for every address that doesn't have one yet (runs in the background). */
+r.post('/geocode/missing', office, (_req, res) => res.json({ queued: queueMissing() }));
 
 // ======================= MARKETING =======================
 function audienceClients(audience) {

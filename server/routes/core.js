@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { db, getSettings, setSettings, UPLOAD_DIR } from '../db.js';
 import { hashPassword, checkPassword, createSession, destroySession, requireAuth, requireRole, publicUser, isOffice } from '../auth.js';
-import { HttpError, bad, notFound, pick, insert, update, clientName, token, today, nowIso } from '../lib.js';
+import { HttpError, bad, notFound, pick, insert, update, clientName, token, today, nowIso, cleanImage } from '../lib.js';
 import { emailEnabled } from '../mailer.js';
 import { seedDefaults } from '../seed-defaults.js';
 
@@ -87,18 +87,43 @@ r.get('/products', (req, res) => {
   res.json(db.prepare(`SELECT * FROM products ${all ? '' : 'WHERE active = 1'} ORDER BY kind, name`).all());
 });
 r.post('/products', requireRole('office'), (req, res) => {
-  const d = pick(req.body, ['name', 'description', 'kind', 'unit_price', 'unit_cost', 'taxable', 'active']);
+  const d = pick(req.body, ['name', 'description', 'kind', 'unit_price', 'unit_cost', 'taxable', 'active', 'image']);
   if (!d.name) throw bad('Name is required');
+  if ('image' in d) d.image = cleanImage(d.image);
   res.json({ id: insert('products', d) });
 });
 r.put('/products/:id', requireRole('office'), (req, res) => {
-  update('products', req.params.id, pick(req.body, ['name', 'description', 'kind', 'unit_price', 'unit_cost', 'taxable', 'active']));
+  const d = pick(req.body, ['name', 'description', 'kind', 'unit_price', 'unit_cost', 'taxable', 'active', 'image']);
+  if ('image' in d) d.image = cleanImage(d.image);
+  update('products', req.params.id, d);
   res.json({ ok: true });
 });
 r.delete('/products/:id', requireRole('office'), (req, res) => {
   update('products', req.params.id, { active: 0 });
   res.json({ ok: true });
 });
+
+// ---------------- custom fields ----------------
+const CF_ENTITIES = ['client', 'request', 'quote', 'job', 'invoice'];
+r.get('/custom-fields', (req, res) => {
+  const where = req.query.entity ? 'WHERE entity = ? AND active = 1' : '';
+  res.json(db.prepare(`SELECT * FROM custom_fields ${where} ORDER BY entity, sort, id`).all(...(req.query.entity ? [req.query.entity] : []))
+    .map((f) => ({ ...f, options: JSON.parse(f.options || '[]') })));
+});
+function cfBody(body) {
+  const d = pick(body, ['entity', 'label', 'field_type', 'show_to_client', 'active', 'sort']);
+  if ('options' in body) d.options = JSON.stringify((Array.isArray(body.options) ? body.options : String(body.options || '').split(',')).map((o) => String(o).trim()).filter(Boolean));
+  return d;
+}
+r.post('/custom-fields', requireRole('office'), (req, res) => {
+  const d = cfBody(req.body);
+  if (!CF_ENTITIES.includes(d.entity)) throw bad('Choose where the field appears');
+  if (!d.label) throw bad('Give the field a name');
+  if (d.field_type === 'select' && JSON.parse(d.options || '[]').length === 0) throw bad('Add at least one option for a dropdown');
+  res.json({ id: insert('custom_fields', d) });
+});
+r.put('/custom-fields/:id', requireRole('office'), (req, res) => { update('custom_fields', req.params.id, cfBody(req.body)); res.json({ ok: true }); });
+r.delete('/custom-fields/:id', requireRole('office'), (req, res) => { update('custom_fields', req.params.id, { active: 0 }); res.json({ ok: true }); });
 
 // ---------------- global search ----------------
 r.get('/search', (req, res) => {
@@ -172,6 +197,12 @@ r.get('/files/:id', (req, res) => {
   res.type(a.mime || 'application/octet-stream');
   res.sendFile(path.join(UPLOAD_DIR, a.stored_name));
 });
+/** Show or hide a quote/invoice file on the client's online copy. */
+r.put('/attachments/:id', requireRole('office'), (req, res) => {
+  update('attachments', req.params.id, { client_visible: req.body.client_visible ? 1 : 0 });
+  res.json({ ok: true });
+});
+
 r.delete('/attachments/:id', (req, res) => {
   const a = db.prepare('SELECT * FROM attachments WHERE id = ?').get(req.params.id);
   if (!a) throw notFound('File');

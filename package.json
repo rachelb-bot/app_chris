@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Voltline \u2014 all-in-one operations platform for an electrical contracting company",
+  "description": "Voltline — all-in-one operations platform for an electrical contracting company",
   "scripts": {
     "dev": "concurrently -k -n api,web \"node --watch server/index.js\" \"vite\"",
     "build": "vite build",
@@ -21,6 +21,7 @@
     "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "express": "^5.3.0",
+    "leaflet": "^1.9.4",
     "multer": "^2.5.0",
     "nodemailer": "^10.3.1"
   },

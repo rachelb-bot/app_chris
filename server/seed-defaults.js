@@ -1,5 +1,6 @@
 import { db } from './db.js';
 import { insert } from './lib.js';
+import { productImage } from './product-images.js';
 
 /** Starter catalogue + quote templates for an electrical contractor. Safe to run once on setup. */
 export const DEFAULT_PRODUCTS = [
@@ -25,13 +26,13 @@ export const DEFAULT_PRODUCTS = [
 export function seedDefaults() {
   if (db.prepare('SELECT COUNT(*) c FROM products').get().c === 0) {
     for (const [name, description, kind, unit_price, unit_cost] of DEFAULT_PRODUCTS) {
-      insert('products', { name, description, kind, unit_price, unit_cost });
+      insert('products', { name, description, kind, unit_price, unit_cost, image: productImage(name) });
     }
   }
   if (db.prepare('SELECT COUNT(*) c FROM quote_templates').get().c === 0) {
     const item = (name) => {
       const p = DEFAULT_PRODUCTS.find((x) => x[0] === name);
-      return { name: p[0], description: p[1], quantity: 1, unit_price: p[3], unit_cost: p[4] };
+      return { name: p[0], description: p[1], quantity: 1, unit_price: p[3], unit_cost: p[4], image: productImage(p[0]) };
     };
     insert('quote_templates', {
       name: 'Electrical panel upgrade',
