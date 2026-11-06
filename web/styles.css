@@ -91,6 +91,7 @@ p { margin: 0; }
 .card-pad { padding: 18px 20px; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
 .card + .card, .stack > * + * { margin-top: 16px; }
+.grid > .card + .card, .board .card + .card { margin-top: 0; }
 .grid { display: grid; gap: 16px; }
 .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -250,7 +251,7 @@ a.stat { text-decoration: none; display: block; } a.stat:hover { border-color: v
 .bars .bar.hl { background: var(--amber); }
 .bars .bar:hover::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; font-size: 11px; padding: 3px 7px; border-radius: 5px; white-space: nowrap; }
 .bars .lbl { font-size: 11px; color: var(--faint); white-space: nowrap; }
-.hbar { display: grid; grid-template-columns: 140px 1fr 50px; gap: 10px; align-items: center; margin: 7px 0; font-size: 13px; }
+.hbar { display: grid; grid-template-columns: 140px 1fr auto; gap: 10px; align-items: center; margin: 7px 0; font-size: 13px; }
 .hbar .track { background: var(--surface-2); border-radius: 5px; height: 14px; overflow: hidden; }
 .hbar .fill { background: var(--ink-3); height: 100%; border-radius: 5px; }
 
@@ -316,3 +317,26 @@ a.stat { text-decoration: none; display: block; } a.stat:hover { border-color: v
 .boot { min-height: 60vh; display: grid; place-items: center; color: var(--muted); font-weight: 600; }
 .preview-pill { position: fixed; z-index: 150; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 10px; background: var(--ink); color: #fff; font-size: 12px; padding: 6px 6px 6px 12px; border-radius: 99px; box-shadow: var(--shadow-lg); }
 .preview-pill button { border: 0; border-radius: 99px; padding: 4px 10px; font-weight: 700; font-size: 12px; background: var(--amber); color: var(--ink); cursor: pointer; }
+
+/* ---------- pipeline board ---------- */
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: start; }
+.board-col { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); min-height: 320px; display: flex; flex-direction: column; }
+.board-col.over { border-color: var(--amber); background: var(--amber-soft); }
+.board-col header { padding: 12px 12px 10px; border-bottom: 1px solid var(--border); border-top: 3px solid var(--ink-3); border-radius: var(--radius) var(--radius) 0 0; display: flex; flex-direction: column; gap: 2px; }
+.board-col.col-won header { border-top-color: var(--green); }
+.board-col.col-lost header { border-top-color: var(--faint); }
+.board-col.col-quote_sent header, .board-col.col-follow_up header { border-top-color: var(--amber); }
+.count-pill { background: var(--surface); border: 1px solid var(--border); border-radius: 99px; font-size: 11px; font-weight: 700; padding: 0 7px; margin-left: auto; }
+.board-cards { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.board-empty { text-align: center; padding: 14px 0; border: 1px dashed var(--border-strong); border-radius: 8px; }
+.deal { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 11px; cursor: grab; box-shadow: var(--shadow); }
+.deal:hover { border-color: var(--border-strong); }
+.deal:focus-visible { outline: 2px solid var(--focus); }
+.deal-title { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.3; }
+.deal .overdue { color: var(--red); font-weight: 600; }
+.col-lost .deal { opacity: .75; }
+.bell { position: relative; }
+.bell-dot { position: absolute; top: 1px; right: 0; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; border-radius: 99px; padding: 0 5px; line-height: 15px; }
+.menu.notif { width: min(360px, 90vw); max-height: 70vh; overflow-y: auto; }
+.menu.notif button { align-items: flex-start; }
+.menu.notif .dot { margin-top: 6px; }

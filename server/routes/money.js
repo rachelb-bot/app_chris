@@ -11,7 +11,7 @@ const r = Router();
 const office = requireRole('office');
 
 // ======================= INVOICES =======================
-const INVOICE_FIELDS = ['client_id', 'property_id', 'job_id', 'subject', 'issue_date', 'due_date', 'discount', 'tax_rate', 'client_message', 'notes'];
+const INVOICE_FIELDS = ['client_id', 'property_id', 'job_id', 'subject', 'issue_date', 'due_date', 'discount', 'tax_rate', 'client_message', 'notes', 'terms', 'show_quantities', 'show_unit_prices', 'show_line_totals'];
 
 export function getInvoice(id) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);
@@ -61,6 +61,7 @@ r.get('/invoices/:id', office, (req, res) => res.json(getInvoice(req.params.id))
 r.post('/invoices', office, (req, res) => {
   const s = getSettings();
   const d = pick(req.body, INVOICE_FIELDS);
+  for (const k of Object.keys(d)) if (d[k] == null) delete d[k];
   let items = req.body.items;
   if (d.job_id && !d.client_id) d.client_id = db.prepare('SELECT client_id FROM jobs WHERE id = ?').get(d.job_id)?.client_id;
   if (!d.client_id) throw bad('Select a client');
@@ -68,12 +69,14 @@ r.post('/invoices', office, (req, res) => {
   const id = db.transaction(() => {
     const issue = d.issue_date || today();
     const iid = insert('invoices', {
-      tax_rate: Number(s.tax_rate) || 0, client_message: s.invoice_message, subject: job?.title || 'For services rendered',
+      tax_rate: Number(s.tax_rate) || 0, client_message: s.invoice_message, terms: s.invoice_terms, subject: job?.title || 'For services rendered',
       property_id: job?.property_id || null,
       ...d, issue_date: issue, due_date: d.due_date || addDays(issue, s.invoice_terms_days || 14), number: nextNumber('invoice'), public_token: token(),
     });
     if (items) replaceLineItems('invoice', iid, items);
     else if (job) copyLineItems('job', job.id, 'invoice', iid);
+    const fromQuote = job?.quote_id && db.prepare('SELECT show_quantities, show_unit_prices, show_line_totals FROM quotes WHERE id = ?').get(job.quote_id);
+    if (fromQuote && !('show_quantities' in d)) update('invoices', iid, fromQuote);
     logActivity({ userId: req.user.id, entityType: 'invoice', entityId: iid, clientId: d.client_id, action: 'created', summary: `Invoice created${job ? ` for job #${job.number}` : ''}` });
     return iid;
   })();
@@ -262,10 +265,29 @@ r.get('/payroll', office, (req, res) => {
   const rows = db.prepare(`SELECT u.id, u.name, u.color, u.hourly_cost,
       COALESCE(SUM(CASE WHEN t.approved = 1 THEN ${hoursSql} END), 0) approved_hours,
       COALESCE(SUM(CASE WHEN t.approved = 0 THEN ${hoursSql} END), 0) pending_hours,
+      COALESCE(SUM(CASE WHEN t.approved = 1 AND t.paid_at IS NULL THEN ${hoursSql} END), 0) unpaid_hours,
+      COUNT(t.id) entries,
       (SELECT COALESCE(SUM(amount),0) FROM expenses e WHERE e.user_id = u.id AND e.reimbursable = 1 AND e.reimbursed = 0 AND e.date BETWEEN ? AND ?) reimbursements
     FROM users u LEFT JOIN time_entries t ON t.user_id = u.id AND t.end_at IS NOT NULL AND t.start_at >= ? AND t.start_at <= ?
     WHERE u.active = 1 GROUP BY u.id ORDER BY u.name`).all(from, to, from + 'T00:00:00.000Z', to + 'T23:59:59.999Z');
-  res.json({ from, to, rows: rows.map((r) => ({ ...r, gross: round2(r.approved_hours * r.hourly_cost) })) });
+  res.json({ from, to, rows: rows.map((r) => {
+    const status = !r.entries && !r.reimbursements ? 'none' : r.unpaid_hours > 0.001 || r.reimbursements > 0 ? 'unpaid' : r.pending_hours > 0.001 ? 'pending' : 'paid';
+    return { ...r, gross: round2(r.approved_hours * r.hourly_cost), unpaid_gross: round2(r.unpaid_hours * r.hourly_cost), status };
+  }) });
+});
+
+/** Mark a team member's approved hours and reimbursable expenses in a pay period as paid. */
+r.post('/payroll/pay', office, (req, res) => {
+  const { user_id, from, to } = req.body || {};
+  if (!user_id || !from || !to) throw bad('Choose a team member and pay period');
+  const now = nowIso();
+  const out = db.transaction(() => ({
+    hours: db.prepare('UPDATE time_entries SET paid_at = ? WHERE user_id = ? AND approved = 1 AND paid_at IS NULL AND end_at IS NOT NULL AND start_at >= ? AND start_at <= ?').run(now, user_id, from + 'T00:00:00.000Z', to + 'T23:59:59.999Z').changes,
+    expenses: db.prepare('UPDATE expenses SET reimbursed = 1, reimbursed_at = ? WHERE user_id = ? AND reimbursable = 1 AND reimbursed = 0 AND date BETWEEN ? AND ?').run(now, user_id, from, to).changes,
+  }))();
+  const u = db.prepare('SELECT name FROM users WHERE id = ?').get(user_id);
+  logActivity({ userId: req.user.id, entityType: 'payroll', entityId: Number(user_id), action: 'paid', summary: `Payroll marked paid for ${u?.name || 'team member'} (${from} – ${to})` });
+  res.json({ ok: true, ...out });
 });
 
 export default r;

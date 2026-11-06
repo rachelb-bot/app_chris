@@ -164,13 +164,13 @@ export function JobForm() {
 }
 
 /** Create or edit a visit. If no jobId is given, lets the user pick a job (used by the schedule). */
-export function VisitModal({ visit, jobId, defaultStart, onClose, onSaved }) {
+export function VisitModal({ visit, jobId, defaultStart, defaultHours = 2, defaultAssignees, onClose, onSaved }) {
   const { user } = useApp();
   const office = isOffice(user);
   const [jid, setJid] = useState(jobId || visit?.job_id || '');
   const { data: jobs } = useLoad(!jobId && !visit ? '/jobs' : null);
   const [f, setF] = useState(() => visit ? { title: visit.title || '', start: toLocalInput(visit.start_at), end: toLocalInput(visit.end_at), anytime: !!visit.anytime, assignees: (visit.assignees || []).map((a) => a.id), instructions: visit.instructions || '', repeat: 'none', occurrences: 4 }
-    : (() => { const s = defaultStart ? new Date(defaultStart) : new Date(`${ymd()}T09:00`); return { title: '', start: toLocalInput(s.toISOString()), end: toLocalInput(new Date(s.getTime() + 2 * 3600e3).toISOString()), anytime: false, assignees: [user.id], instructions: '', repeat: 'none', occurrences: 4 }; })());
+    : (() => { const s = defaultStart ? new Date(defaultStart) : new Date(`${ymd()}T09:00`); return { title: '', start: toLocalInput(s.toISOString()), end: toLocalInput(new Date(s.getTime() + defaultHours * 3600e3).toISOString()), anytime: false, assignees: defaultAssignees || [user.id], instructions: '', repeat: 'none', occurrences: 4 }; })());
   const [run, busy] = useAction();
   const save = () => run(async () => {
     const body = { title: f.title || undefined, start_at: fromLocalInput(f.anytime ? f.start.slice(0, 10) + 'T08:00' : f.start), end_at: fromLocalInput(f.anytime ? f.start.slice(0, 10) + 'T17:00' : f.end), anytime: f.anytime, assignees: f.assignees, instructions: f.instructions, repeat: f.repeat, occurrences: f.repeat === 'none' ? 1 : f.occurrences };

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, qs } from '../api.js';
 import { money, date, ymd } from '../format.js';
-import { useLoad, Loading, Delta, Field, Chips } from '../components/ui.jsx';
+import { useLoad, Loading, Delta, Field, Chips, Seg } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { BarChart, HBars } from '../components/shared.jsx';
 
@@ -21,6 +21,7 @@ const presets = () => {
 export default function Insights() {
   const [preset, setPreset] = useState('month');
   const [range, setRange] = useState(presets().month);
+  const [plView, setPlView] = useState('completed');
   const { data: d } = useLoad(`/insights${qs(range)}`);
   const nav = useNavigate();
   const pick = (p) => { setPreset(p); if (p !== 'custom') setRange(presets()[p]); };
@@ -52,6 +53,23 @@ export default function Insights() {
             <BarChart data={d.revenue} label={(r) => date(r.month + '-01', { month: 'short' })} value={(r) => r.amount} highlightLast />
           </div>
 
+          <div className="grid g3">
+            <div className="card card-pad">
+              <h2>Revenue by lead source</h2><div className="muted small mb">Payments received in period</div>
+              {d.revenueBySource.length ? <HBars data={d.revenueBySource} format={(v) => money(v, { compact: true })} /> : <p className="muted">No payments in this period.</p>}
+            </div>
+            <div className="card card-pad">
+              <h2>Revenue by area</h2><div className="muted small mb">Payments received in period, by town</div>
+              {d.revenueByArea.length ? <HBars data={d.revenueByArea} format={(v) => money(v, { compact: true })} /> : <p className="muted">No payments in this period.</p>}
+            </div>
+            <div className="card card-pad">
+              <h2>Payment methods</h2><div className="muted small mb">How clients prefer to pay</div>
+              {d.paymentMethods.length ? (() => { const tot = d.paymentMethods.reduce((a, m) => a + m.value, 0); return d.paymentMethods.map((m) => (
+                <div key={m.label} className="row mt-s"><span>{m.label}</span><span className="spacer" /><b>{money(m.value, { compact: true })}</b><span className="small muted" style={{ width: 42, textAlign: 'right' }}>{pct(m.value, tot)}%</span></div>
+              )); })() : <p className="muted">No payments in this period.</p>}
+            </div>
+          </div>
+
           <div className="grid g2">
             <div className="card card-pad">
               <h2>Scheduled job value</h2><div className="muted small">Next 4 weeks, by week</div>
@@ -73,15 +91,15 @@ export default function Insights() {
           </div>
 
           <div className="card">
-            <div className="card-head"><h2>Profit and loss</h2><span className="muted small">Recent one-off jobs · labour from timesheets, costs from line items + expenses</span></div>
+            <div className="card-head" style={{ flexWrap: 'wrap' }}><div><h2>Profit and loss</h2><span className="muted small">Recent one-off jobs · labour from timesheets, costs from line items + expenses</span></div><Seg value={plView} onChange={setPlView} options={[['completed', 'Completed'], ['active', 'Active']]} /></div>
             <div className="table-wrap"><table className="table">
               <thead><tr><th>Client</th><th>Job #</th><th className="num">Total price</th><th className="num">Labour cost</th><th className="num">Expenses</th><th className="num">Profit</th><th className="num">Margin</th></tr></thead>
               <tbody>
-                {d.pl.map((j) => (
+                {d.pl.filter((j) => j.status === plView).map((j) => (
                   <tr key={j.id} className="clickable" onClick={() => nav(`/jobs/${j.id}`)}><td className="strong">{j.client_name}</td><td>#{j.number}</td><td className="num">{money(j.total)}</td><td className="num">{money(j.labour)}</td><td className="num">{money(j.expenses)}</td>
                     <td className="num strong" style={{ color: j.profit < 0 ? 'var(--red)' : undefined }}>{money(j.profit)}</td><td className="num">{j.margin}%</td></tr>
                 ))}
-                {!d.pl.length && <tr><td colSpan={7} className="muted">No recent jobs to display.</td></tr>}
+                {!d.pl.filter((j) => j.status === plView).length && <tr><td colSpan={7} className="muted">No recent {plView} jobs to display.</td></tr>}
               </tbody>
             </table></div>
           </div>
@@ -94,6 +112,11 @@ export default function Insights() {
               <div className="card stat"><div className="label">Invoice payment time</div><div className="value">{d.cashflow.payment_time_commercial ?? '—'} <span className="small muted">days</span></div><div className="hint">Commercial · past 30 days</div><div className="strong mt-s">{d.cashflow.payment_time_residential ?? '—'} days</div><div className="hint">Residential</div></div>
               <div className="card stat"><div className="label">Lead conversion time</div><div className="value">{d.conversion.lead_conversion_days ?? '—'} <span className="small muted">days</span></div><div className="hint">Lead → job (90 days)</div><div className="strong mt-s">{d.conversion.quote_approval_days ?? '—'} days</div><div className="hint">Quote approval time (30 days)</div></div>
             </div>
+          </div>
+
+          <div className="grid g2">
+            <div className="card stat"><div className="label">Quote conversion rate</div><div className="value">{d.quotes.conversion_rate == null ? '—' : `${d.quotes.conversion_rate}%`}</div><div className="hint">{d.quotes.won_count} of {d.quotes.sent_count} quotes sent in this period were won</div></div>
+            <div className="card stat"><div className="label">Quote value</div><div className="value">{money(d.quotes.won_value, { compact: true })} <span className="small muted">won</span></div><div className="hint">of {money(d.quotes.sent_value, { compact: true })} quoted in this period</div></div>
           </div>
 
           <div className="grid g2">

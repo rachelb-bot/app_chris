@@ -302,6 +302,43 @@ const migrations = [
   );
   CREATE INDEX activity_client ON activity(client_id);
   `,
+  // 2 — CRM pipeline, document display options, terms, payroll status
+  `
+  CREATE TABLE deals (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+    request_id INTEGER REFERENCES requests(id) ON DELETE SET NULL,
+    quote_id INTEGER REFERENCES quotes(id) ON DELETE SET NULL,
+    job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    stage TEXT NOT NULL DEFAULT 'new' CHECK (stage IN ('new','contacted','assessment','quote_sent','follow_up','won','lost')),
+    value REAL NOT NULL DEFAULT 0,
+    owner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    source TEXT,
+    expected_close TEXT,
+    next_step TEXT,
+    next_step_at TEXT,
+    lost_reason TEXT,
+    sort REAL NOT NULL DEFAULT 0,
+    stage_changed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    won_at TEXT, lost_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX deals_stage ON deals(stage);
+  ALTER TABLE quote_templates ADD COLUMN client_message TEXT;
+  ALTER TABLE quote_templates ADD COLUMN terms TEXT;
+  ALTER TABLE quotes ADD COLUMN show_quantities INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE quotes ADD COLUMN show_unit_prices INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE quotes ADD COLUMN show_line_totals INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE invoices ADD COLUMN terms TEXT;
+  ALTER TABLE invoices ADD COLUMN show_quantities INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE invoices ADD COLUMN show_unit_prices INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE invoices ADD COLUMN show_line_totals INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE requests ADD COLUMN requested_on TEXT;
+  ALTER TABLE time_entries ADD COLUMN paid_at TEXT;
+  ALTER TABLE expenses ADD COLUMN reimbursed_at TEXT;
+  `,
 ];
 
 export function migrate() {
@@ -332,6 +369,8 @@ export const DEFAULT_SETTINGS = {
   quote_valid_days: '30',
   quote_terms: 'All work carried out by registered electrical contractors to current wiring regulations. Quote valid for 30 days.',
   invoice_message: 'Thank you for your business. Please pay by bank transfer using the invoice number as reference.',
+  invoice_terms: 'Payment due within the agreed terms. Late payments may incur interest. All materials remain the property of the contractor until paid in full.',
+  workdays: '1,2,3,4,5',
   bank_details: '',
   next_quote_number: '1001',
   next_job_number: '1001',

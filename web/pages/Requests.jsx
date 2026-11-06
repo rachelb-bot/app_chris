@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Inbox, Plus, MoreHorizontal, Pencil, Trash2, Archive, FileText, Wrench, Search, Link2 } from 'lucide-react';
 import { api, qs } from '../api.js';
-import { money, date, dateTime, toLocalInput, fromLocalInput, ago } from '../format.js';
+import { money, date, dateTime, toLocalInput, fromLocalInput, ago, ymd, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, useDebounced, useToast } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { ClientPicker, PropertySelect, LineItemsEditor, Notes, Attachments, DocLines, useClient } from '../components/shared.jsx';
@@ -50,10 +50,11 @@ export function RequestForm() {
   const nav = useNavigate();
   const { data: team } = useLoad('/users');
   const [f, setF] = useState(null);
+  const [photos, setPhotos] = useState([]);
   const [run, busy] = useAction();
   useEffect(() => {
     if (id) api.get(`/requests/${id}`).then((r) => setF({ ...r, assessment_start: toLocalInput(r.assessment_start), assessment_end: toLocalInput(r.assessment_end) }));
-    else setF({ client_id: Number(params.get('client_id')) || null, property_id: null, title: '', details: '', source: 'Phone', assessment_start: '', assessment_end: '', assigned_to: '', items: [] });
+    else setF({ client_id: Number(params.get('client_id')) || null, property_id: null, title: '', details: '', source: 'Phone', requested_on: ymd(), assessment_start: '', assessment_end: '', assigned_to: '', items: [] });
   }, [id]);
   const { data: client } = useClient(f?.client_id);
   useEffect(() => { if (client && !f.property_id && client.properties[0]) setF((x) => ({ ...x, property_id: client.properties[0].id })); }, [client]);
@@ -61,8 +62,9 @@ export function RequestForm() {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = () => run(async () => {
     const body = { ...f, assessment_start: fromLocalInput(f.assessment_start), assessment_end: fromLocalInput(f.assessment_end) || (f.assessment_start ? new Date(new Date(f.assessment_start).getTime() + 3600e3).toISOString() : null), assigned_to: f.assigned_to || null };
-    if (id) { await api.put(`/requests/${id}`, body); return id; }
-    return (await api.post('/requests', body)).id;
+    const rid = id ? (await api.put(`/requests/${id}`, body), id) : (await api.post('/requests', body)).id;
+    if (photos.length) await api.upload(`/attachments/request/${rid}`, photos);
+    return rid;
   }, 'Request saved').then((rid) => nav(`/requests/${rid}`)).catch(() => {});
 
   return (
@@ -78,6 +80,8 @@ export function RequestForm() {
           <div className="form-grid">
             <Field label="Request title" full><input value={f.title} onChange={set('title')} placeholder="e.g. Tripping RCD in kitchen" /></Field>
             <Field label="Service details" full><textarea rows={4} value={f.details || ''} onChange={set('details')} placeholder="Please provide as much information as you can" /></Field>
+            <Field label="Requested on"><input type="date" value={f.requested_on || ''} onChange={set('requested_on')} /></Field>
+            {!IS_DEMO && <Field label="Photos of the work to be done" full hint={photos.length ? `${photos.length} photo${photos.length === 1 ? '' : 's'} will be attached` : 'Up to 10 images'}><input type="file" accept="image/*" multiple onChange={(e) => setPhotos([...e.target.files].slice(0, 10))} /></Field>}
             <Field label="Source"><select value={f.source || ''} onChange={set('source')}>{['Phone', 'Email', 'Website', 'Online booking', 'Walk-in', 'Referral', 'Other'].map((s) => <option key={s}>{s}</option>)}</select></Field>
           </div>
         </div>
@@ -129,7 +133,7 @@ export function RequestDetail() {
           <div className="card card-pad">
             <h3 className="mb">Request details</h3>
             <dl className="kv">
-              <dt>Requested</dt><dd>{dateTime(r.created_at)}</dd>
+              <dt>Requested on</dt><dd>{date(r.requested_on || r.created_at)}</dd>
               <dt>Source</dt><dd>{r.source || '—'}</dd>
               <dt>Property</dt><dd>{r.property?.address || '—'}</dd>
               <dt>Details</dt><dd className="pre">{r.details || '—'}</dd>

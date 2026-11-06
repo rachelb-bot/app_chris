@@ -115,10 +115,14 @@ function Approve() {
 
 function Payroll() {
   const [range, setRange] = useState({ from: ymd(addDays(new Date(), -13)), to: ymd() });
-  const { data } = useLoad(`/payroll${qs(range)}`);
-  const [run] = useAction();
+  const { data, reload } = useLoad(`/payroll${qs(range)}`);
+  const [run, busy] = useAction();
+  const pay = (r) => askConfirm(`Mark ${r.name}'s approved hours and reimbursable expenses for this period as paid?`, { confirmLabel: 'Mark as paid', danger: false })
+    .then((ok) => ok && run(() => api.post('/payroll/pay', { user_id: r.id, ...range }), `${r.name} marked as paid`).then(reload).catch(() => {}));
+  const STATUS = { paid: ['green', 'Paid'], unpaid: ['amber', 'Unpaid'], pending: ['', 'Awaiting approval'], none: ['', 'No time'] };
   return (
     <div>
+      <p className="muted mb">Keep tabs on payroll by approving timesheets, then marking each person's hours and reimbursable expenses as paid.</p>
       <div className="row wrap mb">
         <Field label="Pay period from"><input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></Field>
         <Field label="To"><input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></Field>
@@ -126,12 +130,14 @@ function Payroll() {
       {!data ? <Loading /> : (
         <div className="card">
           <div className="table-wrap"><table className="table">
-            <thead><tr><th>Team member</th><th className="num">Approved hours</th><th className="num">Pending hours</th><th className="num">Hourly cost</th><th className="num">Gross pay (approved)</th><th className="num">Reimbursements</th></tr></thead>
+            <thead><tr><th>Team member</th><th className="num">Approved hours</th><th className="num">Pending hours</th><th className="num">Hourly cost</th><th className="num">Gross pay (approved)</th><th className="num">Reimbursements</th><th>Status</th><th /></tr></thead>
             <tbody>
               {data.rows.map((r) => (
-                <tr key={r.id}><td><div className="row"><Avatar sm name={r.name} color={r.color} /><b>{r.name}</b></div></td><td className="num">{hours(r.approved_hours)}</td><td className="num muted">{hours(r.pending_hours)}</td><td className="num">{money(r.hourly_cost)}</td><td className="num strong">{money(r.gross)}</td><td className="num">{money(r.reimbursements)}</td></tr>
+                <tr key={r.id}><td><div className="row"><Avatar sm name={r.name} color={r.color} /><b>{r.name}</b></div></td><td className="num">{hours(r.approved_hours)}</td><td className="num muted">{hours(r.pending_hours)}</td><td className="num">{money(r.hourly_cost)}</td><td className="num strong">{money(r.gross)}</td><td className="num">{money(r.reimbursements)}</td>
+                  <td><span className={`badge ${STATUS[r.status][0]}`}>{STATUS[r.status][1]}</span></td>
+                  <td className="right">{r.status === 'unpaid' && <button className="btn sm" disabled={busy} onClick={() => pay(r)}>Mark as paid · {money(r.unpaid_gross + r.reimbursements)}</button>}</td></tr>
               ))}
-              <tr><td className="strong">Total</td><td className="num strong">{hours(data.rows.reduce((s, r) => s + r.approved_hours, 0))}</td><td className="num">{hours(data.rows.reduce((s, r) => s + r.pending_hours, 0))}</td><td /><td className="num strong">{money(data.rows.reduce((s, r) => s + r.gross, 0))}</td><td className="num strong">{money(data.rows.reduce((s, r) => s + r.reimbursements, 0))}</td></tr>
+              <tr><td className="strong">Total</td><td className="num strong">{hours(data.rows.reduce((s, r) => s + r.approved_hours, 0))}</td><td className="num">{hours(data.rows.reduce((s, r) => s + r.pending_hours, 0))}</td><td /><td className="num strong">{money(data.rows.reduce((s, r) => s + r.gross, 0))}</td><td className="num strong">{money(data.rows.reduce((s, r) => s + r.reimbursements, 0))}</td><td /><td /></tr>
             </tbody>
           </table></div>
           <div className="card-pad small muted">Hourly cost is set per team member in Settings → Team. Pending hours must be approved before they count toward pay.

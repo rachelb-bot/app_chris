@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Megaphone, Plus, Send, Trash2, Gift, Link2, Star } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { money, date, dateTime } from '../format.js';
-import { useLoad, useAction, Loading, Empty, Field, Modal, Tabs, Status, useApp, useToast, askConfirm } from '../components/ui.jsx';
+import { useLoad, useAction, Loading, Empty, Field, Modal, Tabs, Status, useApp, useToast, askConfirm, Seg } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { HBars } from '../components/shared.jsx';
 
-function CampaignModal({ campaign, onClose, onSaved }) {
+function CampaignModal({ campaign, preset, onClose, onSaved }) {
   const { data: stats } = useLoad('/clients/stats');
-  const [f, setF] = useState(campaign || { name: '', subject: '', body: 'Hi {first_name},\n\n\n\nKind regards,\n{company}', audience: 'all' });
+  const [f, setF] = useState(campaign || (preset ? { name: preset.name, subject: preset.subject, body: preset.body, audience: preset.audience } : { name: '', subject: '', body: 'Hi {first_name},\n\n\n\nKind regards,\n{company}', audience: 'all' }));
   const [count, setCount] = useState(null);
   const [run, busy] = useAction();
   useEffect(() => { api.get(`/campaigns/audience${qs({ audience: f.audience })}`).then((r) => setCount(r.count)).catch(() => {}); }, [f.audience]);
@@ -31,6 +31,19 @@ function CampaignModal({ campaign, onClose, onSaved }) {
   );
 }
 
+const IDEAS = [
+  { name: 'Periodic inspection reminder', audience: 'past', subject: 'When was your electrics last checked?',
+    body: 'Hi {first_name},\n\nIt has been a while since we worked at your property. Electrical installations should be inspected regularly, and sooner for rental properties.\n\nReply to this email to book a periodic inspection and safety report at a time that suits you.\n\nKind regards,\n{company}' },
+  { name: 'EV charger offer', audience: 'active', subject: 'Getting an electric car? Charge it at home',
+    body: 'Hi {first_name},\n\nWe now install smart home EV chargers, including the dedicated circuit, earthing and certification.\n\nReply for a free quote.\n\nKind regards,\n{company}' },
+  { name: 'Smoke & CO alarm check', audience: 'all', subject: 'Are your smoke and CO alarms working?',
+    body: 'Hi {first_name},\n\nMains smoke and carbon monoxide alarms should be tested regularly and replaced every 10 years. We can test, replace and interlink them in one short visit.\n\nReply to book.\n\nKind regards,\n{company}' },
+  { name: 'Winter safety', audience: 'active', subject: 'Get your electrics ready for winter',
+    body: 'Hi {first_name},\n\nHeaters and extra lighting put more load on your electrics in winter. Book a quick safety check before the cold sets in.\n\nKind regards,\n{company}' },
+  { name: 'Ask for a review', audience: 'active', subject: 'How did we do?',
+    body: 'Hi {first_name},\n\nThank you for choosing us. If you were happy with the work, a short review would help other people find us. It only takes a minute.\n\nKind regards,\n{company}' },
+];
+
 function Campaigns() {
   const { data, reload } = useLoad('/campaigns');
   const { emailEnabled } = useApp();
@@ -41,7 +54,12 @@ function Campaigns() {
   return (
     <div>
       {!emailEnabled && <div className="notice blue mb small">Email delivery isn't configured on this server yet (SMTP settings). Campaign sends will be logged to the outbox only.</div>}
-      <div className="row mb"><span className="spacer" /><button className="btn primary" onClick={() => setEdit({})}><Plus size={16} /> New campaign</button></div>
+      <div className="card card-pad mb">
+        <div className="row"><h3>Start here</h3><span className="muted small">Ready-made campaigns for an electrical business. Pick one, then edit it.</span><span className="spacer" /><button className="btn primary sm" onClick={() => setEdit({})}><Plus size={14} /> Use your own idea</button></div>
+        <div className="grid mt" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 10 }}>
+          {IDEAS.map((i) => <button key={i.name} className="card card-pad" style={{ textAlign: 'left', cursor: 'pointer', font: 'inherit', boxShadow: 'none' }} onClick={() => setEdit({ ...i, idea: true })}><b>{i.name}</b><div className="small muted mt-s">{i.subject}</div></button>)}
+        </div>
+      </div>
       <div className="card">
         {data.length ? (
           <div className="table-wrap"><table className="table">
@@ -64,7 +82,7 @@ function Campaigns() {
           </table></div>
         ) : <Empty icon={Megaphone} title="Boost your revenue with campaigns" action={<button className="btn primary" onClick={() => setEdit({})}>Create a campaign</button>}>Re-engage past clients, upsell services like EV chargers or surge protection, or announce a change — straight from your client list.</Empty>}
       </div>
-      {edit && <CampaignModal campaign={edit.id ? edit : null} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
+      {edit && <CampaignModal campaign={edit.id ? edit : null} preset={edit.idea ? edit : null} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
     </div>
   );
 }
@@ -109,14 +127,17 @@ function Referrals() {
 
 function Performance() {
   const { data } = useLoad('/insights?from=' + new Date(Date.now() - 89 * 864e5).toISOString().slice(0, 10));
+  const [metric, setMetric] = useState('leads');
   const toast = useToast();
   if (!data) return <Loading />;
   const booking = `${location.origin}/hub/book`;
   return (
     <div className="grid g2">
       <div className="card card-pad">
-        <h2>Top performing sources</h2><div className="muted small mb">New leads, past 90 days</div>
-        {data.sources.length ? <HBars data={data.sources.map((s) => ({ label: s.source, value: s.c }))} /> : <p className="muted">No leads yet. Set a lead source on each client to see what's working.</p>}
+        <div className="row"><div><h2>Top performing sources</h2><div className="muted small mb">{metric === 'leads' ? 'New leads' : 'Revenue received'}, past 90 days</div></div><span className="spacer" /><Seg value={metric} onChange={setMetric} options={[['leads', 'Leads'], ['revenue', 'Revenue']]} /></div>
+        {metric === 'leads'
+          ? (data.sources.length ? <HBars data={data.sources.map((s) => ({ label: s.source, value: s.c }))} /> : <p className="muted">No leads yet. Set a lead source on each client to see what's working.</p>)
+          : (data.revenueBySource.length ? <HBars data={data.revenueBySource} format={(v) => money(v, { compact: true })} /> : <p className="muted">No payments in the past 90 days.</p>)}
       </div>
       <div className="card card-pad">
         <h2>Online booking form</h2>

@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Home, CalendarDays, Users, Inbox, FileText, Wrench, Receipt, Megaphone, BarChart3, Wallet, Clock, Settings, Plus, Search, LogOut, Menu, Zap, User, Play, Square } from 'lucide-react';
+import { Home, CalendarDays, Users, Inbox, FileText, Wrench, Receipt, Megaphone, BarChart3, Wallet, Clock, Settings, Plus, Search, LogOut, Menu, Zap, User, Play, Square, Briefcase, Bell } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { useApp, isOffice, Dropdown, useDebounced, useAction, Avatar, Modal, Field } from './ui.jsx';
-import { hours } from '../format.js';
+import { hours, ago } from '../format.js';
 
 export function BrandMark({ size = 18 }) { return <span className="brand-mark"><Zap size={size} fill="currentColor" /></span>; }
 
@@ -24,6 +24,7 @@ export default function Layout({ children }) {
     ['/invoices', Receipt, 'Invoices', office],
     'sep',
     ['/marketing', Megaphone, 'Marketing', office],
+    ['/pipeline', Briefcase, 'Pipeline', office],
     ['/insights', BarChart3, 'Insights', office],
     ['/expenses', Wallet, 'Expenses', true],
     ['/timesheets', Clock, 'Timesheets', true],
@@ -50,6 +51,7 @@ export default function Layout({ children }) {
           <GlobalSearch />
           <div className="topbar-right">
             <ClockWidget />
+            <Notifications />
             <Link to="/settings/account" title={user.name}><Avatar name={user.name} color={user.color} /></Link>
           </div>
         </header>
@@ -111,6 +113,50 @@ function GlobalSearch() {
             </a>
           ))}
           {!res.length && <div className="card-pad muted">No results for “{q}”</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Bell with the latest activity across the business (new requests, approvals, payments…). */
+function Notifications() {
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [seen, setSeen] = useState(() => { try { return Number(localStorage.getItem('vl-seen-activity')) || 0; } catch { return 0; } });
+  const [highlight, setHighlight] = useState(0);
+  const ref = useRef();
+  const nav = useNavigate();
+  const load = () => api.get('/activity?limit=20').then(setItems).catch(() => {});
+  useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => !ref.current?.contains(e.target) && setOpen(false);
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const unread = items.filter((a) => a.id > seen).length;
+  const toggle = () => {
+    setOpen((o) => !o);
+    setHighlight(seen);
+    const max = Math.max(seen, ...items.map((a) => a.id));
+    setSeen(max);
+    try { localStorage.setItem('vl-seen-activity', String(max)); } catch { /* storage unavailable */ }
+  };
+  const urlFor = (a) => ({ client: `/clients/${a.entity_id}`, request: `/requests/${a.entity_id}`, quote: `/quotes/${a.entity_id}`, job: `/jobs/${a.entity_id}`, invoice: `/invoices/${a.entity_id}`, deal: '/pipeline', payroll: '/timesheets' }[a.entity_type]);
+  return (
+    <div className="dropdown" ref={ref}>
+      <button className="btn ghost icon bell" onClick={toggle} aria-label={`Notifications${unread ? ` (${unread} new)` : ''}`}><Bell size={19} />{unread > 0 && <span className="bell-dot">{unread > 9 ? '9+' : unread}</span>}</button>
+      {open && (
+        <div className="menu notif" style={{ right: 0, top: 'calc(100% + 6px)' }}>
+          <div className="row" style={{ padding: '6px 10px' }}><b>Notifications</b></div>
+          {items.map((a) => (
+            <button key={a.id} onClick={() => { setOpen(false); const u = urlFor(a); if (u && a.entity_id != null) nav(u); }}>
+              <span className="dot" style={{ width: 8, height: 8, borderRadius: '50%', background: a.id > highlight ? 'var(--amber)' : 'var(--border-strong)', flex: 'none' }} />
+              <span style={{ minWidth: 0 }}><span style={{ display: 'block' }}>{a.summary}</span><span className="small faint">{a.user_name || 'Client'} · {ago(a.created_at)}</span></span>
+            </button>
+          ))}
+          {!items.length && <div className="small muted" style={{ padding: 10 }}>Nothing yet.</div>}
         </div>
       )}
     </div>

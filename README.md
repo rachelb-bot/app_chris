@@ -6,17 +6,18 @@ The single operations platform and source of truth for an electrical contracting
 
 | Area | What it does |
 |---|---|
-| **Home** | Workflow overview (requests → quotes → jobs → invoices), today's appointments, receivables, upcoming jobs, revenue, recent activity |
-| **Schedule** | Month / week / day calendar of visits and on-site assessments, team filter, drag to reschedule, drag unscheduled jobs onto the calendar |
-| **Clients** | Leads & active clients, multiple properties, tags, lead source, billing history, activity, notes, files, merge duplicates |
+| **Home** | Workflow overview (requests → quotes → jobs → invoices), today's appointments, receivables, upcoming jobs, revenue, recent activity, a getting-started checklist, notifications bell |
+| **Schedule** | Month / week / day calendar of visits and on-site assessments; Type, Team and Status filters; **Find a time** (next free slots by job length and electrician); month picker; drag to reschedule; unscheduled jobs; day route in Google Maps |
+| **Clients** | Leads & active clients, multiple properties, tags, lead source, billing history, activity, notes, files, merge duplicates, CSV import/export |
 | **Requests** | Work enquiries, on-site assessment booking, convert to quote or job, plus a **public online booking form** (`/hub/book`) |
-| **Quotes** | Electrical quote templates, optional line items, deposit, margin, email to client, **online approval with signature**, convert to job |
+| **Quotes** | Electrical quote templates (intro, line items, client message, contract/disclaimer), optional line items, client-view options (hide quantities/unit prices/line totals), deposit, margin, email to client, **online approval with signature**, convert to job, save as template |
 | **Jobs** | One-off & recurring jobs, visits with assigned electricians, on-site safety checklist, photos/certs, live **job costing** (materials, labour from timesheets, expenses) |
 | **Invoices** | From a job in one click or manually, VAT, discounts, send, client view link, partial payments, overdue tracking, void |
-| **Expenses** | Receipts, link to job, reimbursable tracking |
-| **Timesheets** | Clock in/out from the top bar, manual entries, approval, payroll summary + CSV |
-| **Marketing** | Lead-source performance, email campaigns to client segments, referral tracking |
-| **Insights** | Leads, conversions, revenue (12 months), P&L per job, cashflow, payment times, lead funnel |
+| **Expenses** | Receipts, link to job, reimbursable tracking, report by category / person / job / supplier |
+| **Timesheets** | Clock in/out from the top bar, manual entries, approval, payroll with paid/unpaid status and mark-as-paid, CSV |
+| **Marketing** | Lead-source performance (leads or revenue), email campaigns to client segments with ready-made ideas, referral tracking |
+| **Pipeline** | CRM sales pipeline: drag opportunities through New lead → Contacted → Assessment → Quote sent → Follow-up → Won / Lost. Deals are created and moved automatically from requests, quotes and approvals |
+| **Insights** | Leads, conversions, revenue (12 months), revenue by lead source and by area, payment methods, P&L per job (completed / active), cashflow, payment times, quote conversion rate and value, lead funnel |
 | **Settings** | Company & VAT details, bank details, numbering, team & roles, products/services catalogue, quote templates, data export, email log |
 
 **Roles:** Owner / Admin (everything), Office (all client & money work), Electrician (their schedule, jobs, checklist, time and expenses only — no prices or financials). The server enforces these permissions, not just the menus.

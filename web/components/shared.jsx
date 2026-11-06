@@ -287,9 +287,21 @@ export function BarChart({ data, label = (d) => d.label, value = (d) => d.value,
     </div>
   );
 }
-export function HBars({ data }) {
+export function HBars({ data, format = (v) => v }) {
   const max = Math.max(1, ...data.map((d) => d.value));
-  return <div>{data.map((d) => <div className="hbar" key={d.label}><span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span><div className="track"><div className="fill" style={{ width: `${(d.value / max) * 100}%` }} /></div><b className="right">{d.value}</b></div>)}</div>;
+  return <div>{data.map((d) => <div className="hbar" key={d.label}><span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span><div className="track"><div className="fill" style={{ width: `${(d.value / max) * 100}%` }} /></div><b className="right">{format(d.value)}</b></div>)}</div>;
+}
+
+/** Which columns the client sees on a quote or invoice. */
+export function ClientViewOptions({ value, onChange }) {
+  const opt = (k, label) => (
+    <label className="check small"><input type="checkbox" checked={value[k] !== 0 && value[k] !== false} onChange={(e) => onChange({ [k]: e.target.checked ? 1 : 0 })} /> {label}</label>
+  );
+  return (
+    <div className="field full"><span>Client view — what the client sees</span>
+      <div className="row wrap" style={{ gap: 16 }}>{opt('show_quantities', 'Quantities')}{opt('show_unit_prices', 'Unit prices')}{opt('show_line_totals', 'Line totals')}</div>
+    </div>
+  );
 }
 
 export function DocLines({ items, showOptional = true }) {

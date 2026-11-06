@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Wallet, Plus, Paperclip } from 'lucide-react';
+import { Wallet, Plus, Paperclip, BarChart3, List } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { money, date, ymd } from '../format.js';
-import { useLoad, useAction, Loading, Empty, Field, Modal, useApp, isOffice } from '../components/ui.jsx';
+import { useLoad, useAction, Loading, Empty, Field, Modal, useApp, isOffice, Seg } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { Attachments } from '../components/shared.jsx';
+import { Attachments, HBars } from '../components/shared.jsx';
 
 const CATS = ['Materials', 'Tools & equipment', 'Fuel & travel', 'Vehicle', 'Subcontractor', 'Permits & certification', 'Phone & software', 'Insurance', 'Other'];
 
@@ -51,6 +51,7 @@ export default function Expenses() {
   const { data, loading, reload } = useLoad(`/expenses${qs(range)}`);
   const [edit, setEdit] = useState(null);
   const creating = params.get('new') === '1';
+  const [view, setView] = useState('list');
   const total = (data || []).reduce((s, e) => s + e.amount, 0);
   const byCat = Object.entries((data || []).reduce((a, e) => ((a[e.category || 'Other'] = (a[e.category || 'Other'] || 0) + e.amount), a), {})).sort((a, b) => b[1] - a[1]);
   const toReimburse = (data || []).filter((e) => e.reimbursable && !e.reimbursed).reduce((s, e) => s + e.amount, 0);
@@ -60,7 +61,8 @@ export default function Expenses() {
       <PageHead title="Expenses" sub="Log receipts, attach them to jobs and track who gets reimbursed. Everything feeds job costing and payroll.">
         <button className="btn primary" onClick={() => setParams({ new: '1' })}><Plus size={16} /> Add expense</button>
       </PageHead>
-      <div className="row wrap mb">
+      <div className="row wrap mb" style={{ alignItems: 'flex-end' }}>
+        <Seg value={view} onChange={setView} options={[['list', 'Expenses'], ['report', 'View report']]} />
         <Field label="From"><input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></Field>
         <Field label="To"><input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></Field>
       </div>
@@ -69,7 +71,8 @@ export default function Expenses() {
         <div className="card stat"><div className="label">To reimburse</div><div className="value">{money(toReimburse)}</div></div>
         <div className="card stat"><div className="label">Top category</div><div className="value" style={{ fontSize: 20 }}>{byCat[0]?.[0] || '—'}</div><div className="hint">{byCat[0] ? money(byCat[0][1]) : ''}</div></div>
       </div>
-      <div className="card">
+      {view === 'report' && data && <ExpenseReport data={data} />}
+      {view === 'list' && <div className="card">
         {loading && !data ? <Loading /> : data.length ? (
           <div className="table-wrap"><table className="table">
             <thead><tr><th>Date</th><th>Item</th><th className="hide-sm">Category</th><th className="hide-sm">Job</th><th className="hide-sm">Paid by</th><th className="num">Amount</th></tr></thead>
@@ -84,8 +87,29 @@ export default function Expenses() {
             </tbody>
           </table></div>
         ) : <Empty icon={Wallet} title="Track your expenses" action={<button className="btn primary" onClick={() => setParams({ new: '1' })}>Log your first expense</button>}>Upload receipts and invoices, attach them to a job, and know who gets reimbursed.</Empty>}
-      </div>
+      </div>}
       {(creating || edit) && <ExpenseModal expense={edit} onClose={() => { setEdit(null); setParams({}); }} onSaved={() => { setEdit(null); setParams({}); reload(); }} />}
+    </div>
+  );
+}
+
+function ExpenseReport({ data }) {
+  const by = (fn) => Object.entries(data.reduce((a, e) => { const k = fn(e) || 'Not set'; a[k] = (a[k] || 0) + e.amount; return a; }, {}))
+    .map(([label, value]) => ({ label, value: Math.round(value * 100) / 100 })).sort((a, b) => b.value - a.value);
+  const fmt = (v) => money(v);
+  const linked = data.filter((e) => e.job_id).reduce((s, e) => s + e.amount, 0);
+  const total = data.reduce((s, e) => s + e.amount, 0);
+  if (!data.length) return <div className="card"><Empty title="Nothing to report">No expenses in this date range.</Empty></div>;
+  return (
+    <div className="stack">
+      <div className="grid g2">
+        <div className="card card-pad"><h2>By category</h2><div className="mt"><HBars data={by((e) => e.category)} format={fmt} /></div></div>
+        <div className="card card-pad"><h2>By team member</h2><div className="mt"><HBars data={by((e) => e.user_name)} format={fmt} /></div></div>
+      </div>
+      <div className="grid g2">
+        <div className="card card-pad"><h2>By job</h2><div className="small muted">{money(linked)} of {money(total)} is linked to jobs and counted in job costing</div><div className="mt"><HBars data={by((e) => (e.job_number ? `#${e.job_number} ${e.job_title}` : 'Overheads (no job)')).slice(0, 10)} format={fmt} /></div></div>
+        <div className="card card-pad"><h2>By supplier</h2><div className="mt"><HBars data={by((e) => e.supplier).slice(0, 10)} format={fmt} /></div></div>
+      </div>
     </div>
   );
 }

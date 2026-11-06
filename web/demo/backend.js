@@ -72,7 +72,9 @@ export async function boot() {
     import('../../server/routes/work.js'), import('../../server/routes/money.js'), import('../../server/routes/insights.js'),
     import('../../server/routes/hub.js'),
   ]);
-  layers = [hub.default, loadUser, core.default, crm.default, work.default, money.default, insights.default];
+  const pipeline = await import('../../server/routes/pipeline.js');
+  pipeline.backfillDeals();
+  layers = [hub.default, loadUser, core.default, crm.default, work.default, money.default, insights.default, pipeline.default];
 
   const realFetch = window.fetch.bind(window);
   window.fetch = async (input, init = {}) => {

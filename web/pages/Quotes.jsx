@@ -5,7 +5,7 @@ import { api, qs } from '../api.js';
 import { money, date, dateTime, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useToast, useApp } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient } from '../components/shared.jsx';
+import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient, ClientViewOptions } from '../components/shared.jsx';
 
 export function QuotesList() {
   const [params, setParams] = useSearchParams();
@@ -128,7 +128,9 @@ export function QuoteForm() {
         <div className="card card-pad">
           <div className="form-grid">
             <Field label="Client message" full><textarea value={f.client_message || ''} onChange={set('client_message')} placeholder="Shown on the quote" /></Field>
-            <Field label="Terms & conditions" full><textarea value={f.terms || ''} onChange={set('terms')} /></Field>
+            <Field label="Contract / disclaimer" full><textarea rows={4} value={f.terms || ''} onChange={set('terms')} /></Field>
+            <label className="check small full"><input type="checkbox" checked={!!f.apply_terms_to_future} onChange={(e) => setF({ ...f, apply_terms_to_future: e.target.checked })} /> Apply this contract / disclaimer to all future quotes</label>
+            <ClientViewOptions value={f} onChange={(p) => setF({ ...f, ...p })} />
             <Field label="Valid until"><input type="date" value={f.valid_until || ''} onChange={set('valid_until')} /></Field>
           </div>
         </div>
@@ -138,7 +140,7 @@ export function QuoteForm() {
           <button className="btn primary" disabled={busy} onClick={() => save('send')}><Send size={15} /> Save & send</button>
         </div>
       </div>
-      {tpl && <TemplatePicker onClose={() => setTpl(false)} onPick={(t) => { setF({ ...f, title: t.title || t.name, intro: t.intro, items: t.items.map((i) => ({ ...i, selected: i.optional ? 0 : 1, key: Math.random() })) }); setTpl(false); }} />}
+      {tpl && <TemplatePicker onClose={() => setTpl(false)} onPick={(t) => { setF({ ...f, title: t.title || t.name, intro: t.intro, client_message: t.client_message || f.client_message, terms: t.terms || f.terms, items: t.items.map((i) => ({ ...i, selected: i.optional ? 0 : 1, key: Math.random() })) }); setTpl(false); }} />}
     </div>
   );
 }
@@ -207,6 +209,7 @@ export function QuoteDetail() {
           <button onClick={() => (IS_DEMO ? nav(`/hub/quote/${q.public_token}`) : window.open(link, '_blank'))} disabled={q.status === 'draft'}><FileText size={15} /> View as client</button>
           {!IS_DEMO && <button onClick={() => window.print()}><Printer size={15} /> Print / PDF</button>}
           <button onClick={() => run(() => api.post(`/quotes/${q.id}/duplicate`), 'Quote duplicated').then((r) => nav(`/quotes/${r.id}`)).catch(() => {})}><Copy size={15} /> Duplicate</button>
+          <button onClick={() => run(() => api.post('/quote-templates', { name: q.title, title: q.title, intro: q.intro, client_message: q.client_message, terms: q.terms, items: q.items.map(({ id, parent_id, parent_type, ...it }) => it) }), 'Saved as a template')}><LayoutTemplate size={15} /> Save as template</button>
           {q.status !== 'archived' && <button onClick={() => setStatus('archived', 'Archived')}><Archive size={15} /> Archive</button>}
           <button className="danger" onClick={() => setDel(true)}><Trash2 size={15} /> Delete</button>
         </Dropdown>
@@ -223,6 +226,7 @@ export function QuoteDetail() {
               meta={[['Quote #', q.number], ['Created', date(q.created_at)], ['Valid until', date(q.valid_until)], ...(q.sent_at ? [['Sent', date(q.sent_at)]] : [])]} />
             {q.intro && <div className="card-pad pre" style={{ borderBottom: '1px solid var(--border)' }}>{q.intro}</div>}
             <DocLines items={q.items} />
+            {(!q.show_quantities || !q.show_unit_prices || !q.show_line_totals) && <div className="card-pad small muted" style={{ paddingTop: 0 }}>Hidden from the client: {[!q.show_quantities && 'quantities', !q.show_unit_prices && 'unit prices', !q.show_line_totals && 'line totals'].filter(Boolean).join(', ')}</div>}
             <div className="card-pad"><TotalsEditor items={q.items} discount={q.discount} tax_rate={q.tax_rate} deposit={q.deposit} showDeposit={q.deposit > 0} readOnly /></div>
             {(q.client_message || q.terms) && <div className="card-pad small muted pre" style={{ borderTop: '1px solid var(--border)' }}>{[q.client_message, q.terms].filter(Boolean).join('\n\n')}</div>}
           </div>

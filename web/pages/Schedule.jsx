@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Plus, ExternalLink } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, ExternalLink, Search, Route, CalendarX2 } from 'lucide-react';
 import { api, qs } from '../api.js';
 import { date, time, ymd } from '../format.js';
-import { useLoad, useAction, Seg, useApp, isOffice, Avatars, Modal, Status } from '../components/ui.jsx';
+import { useLoad, useAction, Seg, useApp, isOffice, Avatars, Modal, Status, Field } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { VisitModal } from './Jobs.jsx';
 
@@ -18,6 +18,10 @@ export default function Schedule() {
   const [view, setView] = useState(() => (window.innerWidth < 760 ? 'day' : 'week'));
   const [cursor, setCursor] = useState(new Date());
   const [userId, setUserId] = useState('');
+  const [type, setType] = useState('');
+  const [status, setStatus] = useState('');
+  const [finding, setFinding] = useState(false);
+  const [showUnsched, setShowUnsched] = useState(true);
   const [modal, setModal] = useState(null);
   const [peek, setPeek] = useState(null);
   const { data: team } = useLoad('/users');
@@ -37,7 +41,14 @@ export default function Schedule() {
 
   const step = (dir) => setCursor((c) => view === 'day' ? addDays(c, dir) : view === 'week' ? addDays(c, 7 * dir) : new Date(c.getFullYear(), c.getMonth() + dir, 1));
   const title = view === 'month' ? date(cursor, { month: 'long', year: 'numeric' }) : view === 'week' ? `${date(days[0], { day: 'numeric', month: 'short' })} – ${date(days[6], { day: 'numeric', month: 'short', year: 'numeric' })}` : date(cursor, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const eventsOn = (d) => (events || []).filter((e) => ymd(new Date(e.start_at)) === ymd(d) || (new Date(e.start_at) < d && new Date(e.end_at) > d));
+  const nowIso = new Date().toISOString();
+  const eventStatus = (e) => (e.kind === 'assessment' ? (e.end_at < nowIso ? 'overdue' : 'scheduled') : e.status === 'completed' ? 'completed' : e.end_at < nowIso ? 'overdue' : 'scheduled');
+  const visible = (events || []).filter((e) => (!type || e.kind === type) && (!status || eventStatus(e) === status));
+  const eventsOn = (d) => visible.filter((e) => ymd(new Date(e.start_at)) === ymd(d) || (new Date(e.start_at) < d && new Date(e.end_at) > d));
+  const routeUrl = (() => {
+    const stops = eventsOn(cursor).filter((e) => e.street || e.city).sort((a, b) => a.start_at.localeCompare(b.start_at)).map((e) => [e.street, e.city, e.postcode].filter(Boolean).join(', '));
+    return stops.length ? `https://www.google.com/maps/dir/${stops.map(encodeURIComponent).join('/')}` : null;
+  })();
   const refresh = () => { reload(); reloadUnsched(); };
 
   const onDrop = (e, day, hour) => {
@@ -57,6 +68,7 @@ export default function Schedule() {
   return (
     <div>
       <PageHead title="Schedule">
+        {office && <button className="btn accent" onClick={() => setFinding(true)}><Search size={15} /> Find a time</button>}
         {office && <button className="btn primary" onClick={() => setModal({ start: new Date(`${ymd(cursor)}T09:00`).toISOString() })}><Plus size={16} /> Schedule visit</button>}
       </PageHead>
       <div className="row wrap mb">
@@ -66,16 +78,25 @@ export default function Schedule() {
           <button className="btn" onClick={() => setCursor(new Date())}>Today</button>
         </div>
         <h2 style={{ marginLeft: 6 }}>{title}</h2>
+        <input type="month" className="input" style={{ width: 'auto' }} aria-label="Jump to month" value={ymd(cursor).slice(0, 7)} onChange={(e) => e.target.value && setCursor(new Date(e.target.value + '-01T12:00'))} />
         <span className="spacer" />
         {office && (
           <select className="input" style={{ width: 'auto' }} value={userId} onChange={(e) => setUserId(e.target.value)} aria-label="Team filter">
             <option value="">Team: All</option>{(team || []).filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}<option value="unassigned">Unassigned</option>
           </select>
         )}
+        <select className="input" style={{ width: 'auto' }} value={type} onChange={(e) => setType(e.target.value)} aria-label="Type filter">
+          <option value="">Type: All</option><option value="visit">Visits</option><option value="assessment">Assessments</option>
+        </select>
+        <select className="input" style={{ width: 'auto' }} value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status filter">
+          <option value="">Status: All</option><option value="scheduled">Scheduled</option><option value="completed">Completed</option><option value="overdue">Overdue</option>
+        </select>
+        {office && <button className="btn" title="Unscheduled jobs" onClick={() => setShowUnsched((v) => !v)}><CalendarX2 size={15} /> {unscheduled?.length || 0}</button>}
+        {view === 'day' && routeUrl && <a className="btn" href={routeUrl} target="_blank" rel="noreferrer" title="Open today's stops in Google Maps"><Route size={15} /> Route</a>}
         <Seg value={view} onChange={setView} options={[['month', 'Month'], ['week', 'Week'], ['day', 'Day']]} />
       </div>
 
-      <div className={office && unscheduled?.length && view !== 'month' ? 'grid g-main-side' : ''} style={office && unscheduled?.length && view !== 'month' ? { gridTemplateColumns: 'minmax(0,1fr) 240px' } : undefined}>
+      <div className={office && showUnsched && unscheduled?.length && view !== 'month' ? 'grid g-main-side' : ''} style={office && showUnsched && unscheduled?.length && view !== 'month' ? { gridTemplateColumns: 'minmax(0,1fr) 240px' } : undefined}>
         {view === 'month' ? (
           <div className="month">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div className="dow" key={d}>{d}</div>)}
@@ -129,7 +150,7 @@ export default function Schedule() {
             </div>
           </div>
         )}
-        {office && !!unscheduled?.length && view !== 'month' && (
+        {office && showUnsched && !!unscheduled?.length && view !== 'month' && (
           <div className="card">
             <div className="card-head"><h3>Unscheduled jobs</h3></div>
             <div className="card-pad" style={{ paddingTop: 8 }}>
@@ -144,7 +165,8 @@ export default function Schedule() {
         )}
       </div>
 
-      {modal && <VisitModal jobId={modal.jobId} visit={modal.visit} defaultStart={modal.start} onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh(); }} />}
+      {modal && <VisitModal jobId={modal.jobId} visit={modal.visit} defaultStart={modal.start} defaultHours={modal.hours} defaultAssignees={modal.assignees} onClose={() => setModal(null)} onSaved={() => { setModal(null); refresh(); }} />}
+      {finding && <FindATime team={(team || []).filter((u) => u.active)} onClose={() => setFinding(false)} onPick={(slot) => { setFinding(false); setModal({ start: slot.start.toISOString(), hours: slot.hours, assignees: [slot.user.id] }); }} />}
       {peek && (
         <Modal title={peek.kind === 'assessment' ? 'Assessment' : `Visit · Job #${peek.job_number}`} onClose={() => setPeek(null)} footer={<>
           {peek.kind === 'visit' && peek.status !== 'completed' && <button className="btn" onClick={() => run(() => api.put(`/visits/${peek.id}`, { status: 'completed' }), 'Visit completed').then(() => { setPeek(null); refresh(); }).catch(() => {})}>Mark complete</button>}
@@ -163,5 +185,65 @@ export default function Schedule() {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Finds the next free slots of a given length for each team member, inside working hours. */
+function FindATime({ team, onClose, onPick }) {
+  const { settings } = useApp();
+  const [hours, setHours] = useState(2);
+  const [who, setWho] = useState('');
+  const [from, setFrom] = useState(ymd());
+  const [slots, setSlots] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const search = async () => {
+    setBusy(true);
+    try {
+      const to = ymd(addDays(new Date(from + 'T12:00'), 21));
+      const evs = await api.get(`/schedule${qs({ from, to })}`);
+      const workdays = String(settings.workdays || '1,2,3,4,5').split(',').map(Number);
+      const [sh, sm] = String(settings.workday_start || '08:00').split(':').map(Number);
+      const [eh, em] = String(settings.workday_end || '17:00').split(':').map(Number);
+      const people = who ? team.filter((u) => String(u.id) === String(who)) : team.filter((u) => u.role === 'tech').length ? team.filter((u) => u.role === 'tech') : team;
+      const out = [];
+      const now = Date.now();
+      for (let i = 0; i <= 21 && out.length < 8; i++) {
+        const day = addDays(new Date(from + 'T12:00'), i);
+        if (!workdays.includes(day.getDay())) continue;
+        const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), sh, sm).getTime();
+        const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), eh, em).getTime();
+        for (const u of people) {
+          const busyBlocks = evs.filter((e) => e.status !== 'completed' && e.assignees?.some((a) => a.id === u.id)).map((e) => [new Date(e.start_at).getTime(), new Date(e.end_at).getTime()]);
+          for (let t = dayStart; t + hours * 3600e3 <= dayEnd; t += 30 * 60e3) {
+            if (t < now) continue;
+            const end = t + hours * 3600e3;
+            if (busyBlocks.every(([a, b]) => end <= a || t >= b)) { out.push({ start: new Date(t), hours, user: u }); break; }
+          }
+          if (out.length >= 8) break;
+        }
+      }
+      setSlots(out);
+    } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="Find a time" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Close</button><button className="btn primary" disabled={busy} onClick={search}><Search size={15} /> Find free slots</button></>}>
+      <div className="form-grid">
+        <Field label="Job length"><select value={hours} onChange={(e) => setHours(Number(e.target.value))}>{[1, 1.5, 2, 3, 4, 6, 8].map((h) => <option key={h} value={h}>{h} hour{h === 1 ? '' : 's'}</option>)}</select></Field>
+        <Field label="Who"><select value={who} onChange={(e) => setWho(e.target.value)}><option value="">Any electrician</option>{team.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
+        <Field label="From"><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></Field>
+        <div className="small muted" style={{ alignSelf: 'end' }}>Working hours {settings.workday_start || '08:00'}–{settings.workday_end || '17:00'} (Settings → Company)</div>
+      </div>
+      {slots && (
+        <ul className="list-plain mt">
+          {slots.map((s, i) => (
+            <li key={i} className="row">
+              <div style={{ flex: 1 }}><b>{date(s.start, { weekday: 'short', day: 'numeric', month: 'short' })} · {time(s.start)}–{time(new Date(s.start.getTime() + s.hours * 3600e3))}</b><div className="small muted">{s.user.name}</div></div>
+              <button className="btn sm primary" onClick={() => onPick(s)}>Book</button>
+            </li>
+          ))}
+          {!slots.length && <li className="muted">No free slots in the next 3 weeks for that length. Try a shorter visit or another person.</li>}
+        </ul>
+      )}
+    </Modal>
   );
 }

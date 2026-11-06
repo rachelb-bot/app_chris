@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, logActivity } from '../db.js';
 import { requireRole } from '../auth.js';
+import { syncDeal } from './pipeline.js';
 import { bad, notFound, pick, insert, update, clientName, formatAddress, getLineItems, replaceLineItems, computeTotals, invoiceTotals, invoiceDisplayStatus, jobDisplayStatus } from '../lib.js';
 
 const r = Router();
@@ -20,6 +21,23 @@ export function getClient(id) {
 export function promoteLead(clientId) {
   db.prepare("UPDATE clients SET status = 'active', updated_at = datetime('now') WHERE id = ? AND status = 'lead'").run(clientId);
 }
+
+// ---------------- getting started checklist ----------------
+r.get('/onboarding', (_req, res) => {
+  const c = (sql) => db.prepare(sql).get().c;
+  const s = Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map((x) => [x.key, x.value]));
+  res.json([
+    { key: 'company', label: 'Add your company details, VAT number and bank details', done: !!(s.company_phone && s.company_address && s.bank_details), url: '/settings/company' },
+    { key: 'team', label: 'Add your electricians and office team', done: c('SELECT COUNT(*) c FROM users') > 1, url: '/settings/team' },
+    { key: 'products', label: 'Check your prices in the products & services list', done: c("SELECT COUNT(*) c FROM products WHERE created_at > (SELECT MIN(created_at) FROM users)") > 0 || c('SELECT COUNT(*) c FROM line_items') > 0, url: '/settings/products' },
+    { key: 'client', label: 'Add or import your clients', done: c('SELECT COUNT(*) c FROM clients') > 0, url: '/clients' },
+    { key: 'quote', label: 'Send your first quote', done: c('SELECT COUNT(*) c FROM quotes WHERE sent_at IS NOT NULL') > 0, url: '/quotes/new' },
+    { key: 'job', label: 'Schedule a job', done: c('SELECT COUNT(*) c FROM visits') > 0, url: '/jobs/new' },
+    { key: 'invoice', label: 'Send an invoice', done: c('SELECT COUNT(*) c FROM invoices WHERE sent_at IS NOT NULL') > 0, url: '/invoices/new' },
+    { key: 'payment', label: 'Record a payment', done: c('SELECT COUNT(*) c FROM payments') > 0, url: '/invoices' },
+    { key: 'booking', label: 'Put your online booking form on your website', done: c("SELECT COUNT(*) c FROM requests WHERE source = 'Online booking'") > 0, url: '/marketing' },
+  ]);
+});
 
 // ---------------- clients ----------------
 r.get('/clients', (req, res) => {
@@ -120,6 +138,29 @@ r.post('/clients/:id/merge', requireRole('admin'), (req, res) => {
   res.json({ ok: true });
 });
 
+/** Bulk import clients (rows already parsed from CSV in the browser). Skips rows with no name. */
+r.post('/clients/import', requireRole('office'), (req, res) => {
+  const rows = Array.isArray(req.body.rows) ? req.body.rows.slice(0, 5000) : [];
+  let created = 0, skipped = 0, duplicates = 0;
+  const byEmail = db.prepare('SELECT id FROM clients WHERE email = ? COLLATE NOCASE');
+  db.transaction(() => {
+    for (const row of rows) {
+      const c = pick(row, CLIENT_FIELDS);
+      if (!c.first_name && !c.last_name && !c.company_name) { skipped++; continue; }
+      if (c.email && byEmail.get(c.email)) { duplicates++; continue; }
+      const status = ['lead', 'active', 'archived'].includes(String(c.status || '').toLowerCase()) ? String(c.status).toLowerCase() : 'active';
+      const type = String(c.client_type || '').toLowerCase().startsWith('com') ? 'commercial' : 'residential';
+      const tags = String(row.tags || '').split(/[;,|]/).map((t) => t.trim()).filter(Boolean);
+      const cid = insert('clients', { ...c, status, client_type: type, tags: JSON.stringify(tags) });
+      const p = pick(row, PROPERTY_FIELDS);
+      if (Object.values(p).some(Boolean)) insert('properties', { ...p, client_id: cid });
+      created++;
+    }
+    if (created) logActivity({ userId: req.user.id, entityType: 'client', action: 'imported', summary: `Imported ${created} clients` });
+  })();
+  res.json({ created, skipped, duplicates });
+});
+
 // ---------------- properties ----------------
 r.post('/clients/:id/properties', requireRole('office'), (req, res) => {
   getClient(req.params.id);
@@ -135,7 +176,7 @@ r.delete('/properties/:id', requireRole('office'), (req, res) => {
 });
 
 // ---------------- requests ----------------
-const REQUEST_FIELDS = ['client_id', 'property_id', 'title', 'details', 'source', 'status', 'assessment_start', 'assessment_end', 'assigned_to'];
+const REQUEST_FIELDS = ['client_id', 'property_id', 'title', 'details', 'source', 'status', 'assessment_start', 'assessment_end', 'assigned_to', 'requested_on'];
 
 function getRequest(id) {
   const x = db.prepare('SELECT * FROM requests WHERE id = ?').get(id);
@@ -174,8 +215,9 @@ r.post('/requests', requireRole('office'), (req, res) => {
     if (!d.client_id) throw bad('Select a client');
     if (!d.title) throw bad('Request title is required');
     if (d.assessment_start && (!d.status || d.status === 'new')) d.status = 'assessment';
-    const rid = insert('requests', d);
+    const rid = insert('requests', { ...d, requested_on: d.requested_on || new Date().toISOString().slice(0, 10) });
     replaceLineItems('request', rid, req.body.items);
+    syncDeal({ clientId: d.client_id, requestId: rid, stage: d.status === 'assessment' ? 'assessment' : 'new', title: d.title, source: d.source, userId: req.user.id });
     logActivity({ userId: req.user.id, entityType: 'request', entityId: rid, clientId: d.client_id, action: 'created', summary: `Request "${d.title}" created` });
     return rid;
   })();
@@ -189,6 +231,7 @@ r.put('/requests/:id', requireRole('office'), (req, res) => {
   db.transaction(() => {
     update('requests', x.id, d);
     if (req.body.items) replaceLineItems('request', x.id, req.body.items);
+    if (d.assessment_start) syncDeal({ clientId: x.client_id, requestId: x.id, stage: 'assessment', title: x.title });
   })();
   res.json({ ok: true });
 });

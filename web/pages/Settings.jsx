@@ -33,7 +33,23 @@ function Company() {
           {F({ k: 'invoice_terms_days', label: 'Invoice payment terms (days)', type: 'number' })}{F({ k: 'quote_valid_days', label: 'Quotes valid for (days)', type: 'number' })}
           {F({ k: 'bank_details', label: 'Bank details (shown on invoices)', full: true, area: true })}
           {F({ k: 'invoice_message', label: 'Default invoice message', full: true, area: true })}
-          {F({ k: 'quote_terms', label: 'Default quote terms', full: true, area: true })}
+          {F({ k: 'quote_terms', label: 'Default quote contract / disclaimer', full: true, area: true })}
+          {F({ k: 'invoice_terms', label: 'Default invoice contract / disclaimer', full: true, area: true })}
+        </div>
+      </div>
+      <div className="card card-pad">
+        <div className="section-title">Working hours (used by Find a time)</div>
+        <div className="form-grid">
+          {F({ k: 'workday_start', label: 'Day starts', type: 'time' })}{F({ k: 'workday_end', label: 'Day ends', type: 'time' })}
+          <div className="field full"><span>Working days</span>
+            <div className="row wrap" style={{ gap: 14 }}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => {
+                const days = String(f.workdays || '1,2,3,4,5').split(',').filter(Boolean).map(Number);
+                const on = days.includes(i);
+                return <label key={d} className="check small"><input type="checkbox" disabled={!can} checked={on} onChange={() => setF({ ...f, workdays: (on ? days.filter((x) => x !== i) : [...days, i]).sort().join(',') })} /> {d}</label>;
+              })}
+            </div>
+          </div>
         </div>
       </div>
       <div className="card card-pad">
@@ -142,7 +158,7 @@ function Templates() {
   const save = () => run(() => { const body = { ...edit, items: edit.items.map(({ key, ...r }) => r) }; return edit.id ? api.put(`/quote-templates/${edit.id}`, body) : api.post('/quote-templates', body); }, 'Template saved').then(() => { setEdit(null); reload(); }).catch(() => {});
   return (
     <div className="card">
-      <div className="card-head"><h3>Quote templates</h3><button className="btn primary sm" onClick={() => setEdit({ name: '', title: '', intro: '', items: [] })}><Plus size={14} /> New template</button></div>
+      <div className="card-head"><h3>Quote templates</h3><button className="btn primary sm" onClick={() => setEdit({ name: '', title: '', intro: '', client_message: '', terms: '', items: [] })}><Plus size={14} /> New template</button></div>
       <ul className="list-plain" style={{ padding: '0 20px' }}>
         {data.map((t) => (
           <li key={t.id} className="row"><div style={{ flex: 1 }}><b>{t.name}</b><div className="small muted">{t.items.length} items</div></div>
@@ -157,6 +173,8 @@ function Templates() {
             <Field label="Template name"><input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
             <Field label="Quote title"><input value={edit.title || ''} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></Field>
             <Field label="Introduction" full><textarea rows={4} value={edit.intro || ''} onChange={(e) => setEdit({ ...edit, intro: e.target.value })} /></Field>
+            <Field label="Client message" full><textarea rows={3} value={edit.client_message || ''} onChange={(e) => setEdit({ ...edit, client_message: e.target.value })} /></Field>
+            <Field label="Contract / disclaimer" full><textarea rows={4} value={edit.terms || ''} onChange={(e) => setEdit({ ...edit, terms: e.target.value })} placeholder="Leave blank to use your default quote terms" /></Field>
           </div>
           <div className="mt"><LineItemsEditor items={edit.items} onChange={(items) => setEdit({ ...edit, items })} allowOptional /></div>
         </Modal>

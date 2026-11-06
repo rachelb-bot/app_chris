@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { db, getSettings, nextNumber, logActivity } from '../db.js';
+import { db, getSettings, setSettings, nextNumber, logActivity } from '../db.js';
 import { requireRole, isOffice } from '../auth.js';
 import { HttpError, bad, notFound, pick, insert, update, clientName, token, today, addDays, nowIso,
   getLineItems, replaceLineItems, copyLineItems, computeTotals, jobDisplayStatus } from '../lib.js';
 import { getClient, promoteLead } from './crm.js';
 import { sendEmail } from '../mailer.js';
 import { formatMoney, hubUrl } from '../format.js';
+import { syncDeal, quoteValue } from './pipeline.js';
 
 const r = Router();
 export const DEFAULT_CHECKLIST = ['Safe isolation confirmed', 'Test results recorded', 'Certificate issued to client'];
@@ -15,12 +16,12 @@ r.get('/quote-templates', (_req, res) => {
   res.json(db.prepare('SELECT * FROM quote_templates ORDER BY name').all().map((t) => ({ ...t, items: JSON.parse(t.items || '[]') })));
 });
 r.post('/quote-templates', requireRole('office'), (req, res) => {
-  const d = pick(req.body, ['name', 'title', 'intro']);
+  const d = pick(req.body, ['name', 'title', 'intro', 'client_message', 'terms']);
   if (!d.name) throw bad('Template name is required');
   res.json({ id: insert('quote_templates', { ...d, items: JSON.stringify(req.body.items || []) }) });
 });
 r.put('/quote-templates/:id', requireRole('office'), (req, res) => {
-  const d = pick(req.body, ['name', 'title', 'intro']);
+  const d = pick(req.body, ['name', 'title', 'intro', 'client_message', 'terms']);
   if (req.body.items) d.items = JSON.stringify(req.body.items);
   update('quote_templates', req.params.id, d);
   res.json({ ok: true });
@@ -31,7 +32,7 @@ r.delete('/quote-templates/:id', requireRole('office'), (req, res) => {
 });
 
 // ======================= QUOTES =======================
-const QUOTE_FIELDS = ['client_id', 'property_id', 'request_id', 'title', 'intro', 'discount', 'tax_rate', 'deposit', 'client_message', 'terms', 'valid_until'];
+const QUOTE_FIELDS = ['client_id', 'property_id', 'request_id', 'title', 'intro', 'discount', 'tax_rate', 'deposit', 'client_message', 'terms', 'valid_until', 'show_quantities', 'show_unit_prices', 'show_line_totals'];
 
 export function getQuote(id) {
   const q = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
@@ -69,6 +70,8 @@ r.post('/quotes', requireRole('office'), (req, res) => {
     });
     replaceLineItems('quote', qid, req.body.items);
     if (d.request_id) db.prepare("UPDATE requests SET status = 'converted' WHERE id = ?").run(d.request_id);
+    if (req.body.apply_terms_to_future && d.terms != null) setSettings({ quote_terms: d.terms });
+    syncDeal({ clientId: d.client_id, quoteId: qid, requestId: d.request_id || null, stage: 'new', value: quoteValue(qid), title: d.title, userId: req.user.id });
     logActivity({ userId: req.user.id, entityType: 'quote', entityId: qid, clientId: d.client_id, action: 'created', summary: `Quote "${d.title}" created` });
     return qid;
   })();
@@ -81,6 +84,9 @@ r.put('/quotes/:id', requireRole('office'), (req, res) => {
   db.transaction(() => {
     update('quotes', q.id, d);
     if (req.body.items) replaceLineItems('quote', q.id, req.body.items);
+    if (req.body.apply_terms_to_future && d.terms != null) setSettings({ quote_terms: d.terms });
+    const dealStage = { approved: 'won', converted: 'won', sent: 'quote_sent', changes_requested: 'follow_up' }[d.status];
+    syncDeal({ clientId: q.client_id, quoteId: q.id, requestId: q.request_id, stage: dealStage || 'new', value: quoteValue(q.id), title: d.title || q.title });
     if (d.status && d.status !== q.status) {
       if (d.status === 'approved') { update('quotes', q.id, { approved_at: nowIso() }); promoteLead(q.client_id); }
       logActivity({ userId: req.user.id, entityType: 'quote', entityId: q.id, clientId: q.client_id, action: d.status, summary: `Quote #${q.number} marked ${d.status.replace('_', ' ')}` });
@@ -106,6 +112,7 @@ r.post('/quotes/:id/send', requireRole('office'), async (req, res) => {
   if (result.status === 'failed') throw new HttpError(502, `Email failed: ${result.error}`);
   db.transaction(() => {
     update('quotes', q.id, { status: ['draft', 'changes_requested'].includes(q.status) ? 'sent' : q.status, sent_at: nowIso() });
+    syncDeal({ clientId: q.client_id, quoteId: q.id, requestId: q.request_id, stage: 'quote_sent', value: q.totals.total, title: q.title, userId: req.user.id });
     logActivity({ userId: req.user.id, entityType: 'quote', entityId: q.id, clientId: q.client_id, action: 'sent', summary: `Quote #${q.number} sent to ${to}` });
   })();
   res.json({ ok: true, delivery: result.status, link });
@@ -123,6 +130,7 @@ r.post('/quotes/:id/convert', requireRole('office'), (req, res) => {
     DEFAULT_CHECKLIST.forEach((label, i) => insert('checklist_items', { job_id: jid, label, sort: i }));
     update('quotes', q.id, { status: 'converted', approved_at: q.approved_at || nowIso() });
     promoteLead(q.client_id);
+    syncDeal({ clientId: q.client_id, quoteId: q.id, requestId: q.request_id, jobId: jid, stage: 'won', value: q.totals.total, title: q.title });
     logActivity({ userId: req.user.id, entityType: 'job', entityId: jid, clientId: q.client_id, action: 'created', summary: `Job created from quote #${q.number}` });
     return jid;
   })();
@@ -202,7 +210,10 @@ r.post('/jobs', requireRole('office'), (req, res) => {
     replaceLineItems('job', jid, req.body.items);
     for (const v of req.body.visits || []) createVisit(jid, v, d.title);
     (req.body.checklist || []).forEach((label, i) => label && insert('checklist_items', { job_id: jid, label, sort: i }));
-    if (req.body.request_id) db.prepare("UPDATE requests SET status = 'converted' WHERE id = ?").run(req.body.request_id);
+    if (req.body.request_id) {
+      db.prepare("UPDATE requests SET status = 'converted' WHERE id = ?").run(req.body.request_id);
+      syncDeal({ clientId: d.client_id, requestId: Number(req.body.request_id), jobId: jid, stage: 'won', value: computeTotals(getLineItems('job', jid)).subtotal, title: d.title });
+    }
     promoteLead(d.client_id);
     logActivity({ userId: req.user.id, entityType: 'job', entityId: jid, clientId: d.client_id, action: 'created', summary: `Job "${d.title}" created` });
     return jid;
@@ -309,7 +320,7 @@ r.get('/schedule', (req, res) => {
   const to = req.query.to || addDays(from, 7);
   const userFilter = req.query.user_id ? Number(req.query.user_id) : (!isOffice(req.user) ? req.user.id : null);
   const visits = db.prepare(`SELECT v.*, j.number job_number, j.title job_title, j.client_id, c.first_name, c.last_name, c.company_name,
-      p.street, p.city
+      p.street, p.city, p.postcode
     FROM visits v JOIN jobs j ON j.id = v.job_id JOIN clients c ON c.id = j.client_id
     LEFT JOIN properties p ON p.id = j.property_id
     WHERE v.start_at < ? AND v.end_at >= ? AND j.status != 'archived' ORDER BY v.start_at`).all(to + 'T23:59:59.999Z', from + 'T00:00:00.000Z')

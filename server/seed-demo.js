@@ -3,6 +3,7 @@ import { db, migrate, setSettings, nextNumber, logActivity } from './db.js';
 import { insert, replaceLineItems, token, addDays, today } from './lib.js';
 import { hashPassword } from './auth.js';
 import { seedDefaults, DEFAULT_PRODUCTS } from './seed-defaults.js';
+import { backfillDeals } from './routes/pipeline.js';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -124,6 +125,16 @@ db.transaction(() => {
 
   insert('referrals', { referrer_client_id: clients[1].id, referred_client_id: clients[7].id, reward: '€25 credit on next job', status: 'pending' });
   insert('campaigns', { name: 'Autumn EICR reminder', subject: 'Is your home electrically safe this winter?', body: 'Hi {first_name},\n\nWinter is the busiest time for electrical faults. Book a periodic inspection now and get 10% off.\n\nKind regards,\n{company}', audience: 'active' });
+  // Pipeline: derive deals from the requests/quotes above, then add a few in other stages
+  db.prepare("DELETE FROM settings WHERE key = '_deals_backfilled'").run();
+  backfillDeals();
+  const deal = (c, title, stage, value, extra = {}) => insert('deals', { title, client_id: c.id, stage, value, owner_id: owner.id, source: db.prepare('SELECT lead_source FROM clients WHERE id = ?').get(c.id).lead_source, ...extra });
+  deal(clients[5], 'Office LED lighting retrofit – 3 floors', 'contacted', 6800, { next_step: 'Walk-through with facilities manager', next_step_at: addDays(t, 2), expected_close: addDays(t, 21), stage_changed_at: dt(3) });
+  deal(clients[2], 'Second café unit – full fit-out', 'follow_up', 9400, { next_step: 'Revise quote with 3-phase supply option', next_step_at: addDays(t, 1), expected_close: addDays(t, 14), stage_changed_at: dt(9) });
+  deal(clients[6], 'Garden room supply & lighting', 'new', 1850, { stage_changed_at: dt(0) });
+  deal(clients[1], 'Apartment block EICRs (6 units)', 'quote_sent', 1320, { owner_id: aoife, expected_close: addDays(t, 10), stage_changed_at: dt(5) });
+  deal(clients[4], 'Solar PV battery prep', 'lost', 2400, { lost_reason: 'Went with the solar installer\'s own electrician', lost_at: new Date(Date.now() - 12 * 864e5).toISOString(), stage_changed_at: dt(12) });
+
   for (const j of [j1, j2, j3, j5, j6]) logActivity({ userId: aoife, entityType: 'job', entityId: j, clientId: db.prepare('SELECT client_id FROM jobs WHERE id = ?').get(j).client_id, action: 'created', summary: `Job #${db.prepare('SELECT number FROM jobs WHERE id = ?').get(j).number} created` });
 })();
 }

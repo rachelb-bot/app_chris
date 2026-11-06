@@ -30,20 +30,22 @@ function HubShell({ company, children }) {
   );
 }
 
-function Lines({ items, selectable, selected, onToggle }) {
+function Lines({ items, selectable, selected, onToggle, doc = {} }) {
+  const qty = doc.show_quantities !== 0, unit = doc.show_unit_prices !== 0, line = doc.show_line_totals !== 0;
+  const cols = 1 + qty + unit + line;
   return (
     <table className="table">
-      <thead><tr><th>Product / Service</th><th className="num">Qty</th><th className="num">Unit price</th><th className="num">Total</th></tr></thead>
+      <thead><tr><th>Product / Service</th>{qty && <th className="num">Qty</th>}{unit && <th className="num">Unit price</th>}{line && <th className="num">Total</th>}</tr></thead>
       <tbody>
-        {items.map((it) => it.is_text ? <tr key={it.id}><td colSpan={4} className="pre strong">{it.name}</td></tr> : (
+        {items.map((it) => it.is_text ? <tr key={it.id}><td colSpan={cols} className="pre strong">{it.name}</td></tr> : (
           <tr key={it.id} style={{ opacity: it.optional && !(selectable ? selected.has(it.id) : it.selected) ? 0.6 : 1 }}>
             <td>
               <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
                 {selectable && !!it.optional && <input type="checkbox" checked={selected.has(it.id)} onChange={() => onToggle(it.id)} style={{ width: 17, height: 17, marginTop: 2, accentColor: 'var(--ink)' }} aria-label={`Include ${it.name}`} />}
-                <div><div className="strong">{it.name}{!!it.optional && <span className="badge" style={{ marginLeft: 6 }}>Optional</span>}</div>{it.description && <div className="small muted pre">{it.description}</div>}</div>
+                <div><div className="strong">{it.name}{!!it.optional && <span className="badge" style={{ marginLeft: 6 }}>Optional{!line && !unit ? ` · ${money(it.quantity * it.unit_price)}` : ''}</span>}</div>{it.description && <div className="small muted pre">{it.description}</div>}</div>
               </div>
             </td>
-            <td className="num">{it.quantity}</td><td className="num">{money(it.unit_price)}</td><td className="num strong">{money(it.quantity * it.unit_price)}</td>
+            {qty && <td className="num">{it.quantity}</td>}{unit && <td className="num">{money(it.unit_price)}</td>}{line && <td className="num strong">{money(it.quantity * it.unit_price)}</td>}
           </tr>
         ))}
       </tbody>
@@ -83,7 +85,7 @@ export function QuoteHub() {
           <div><h2>{q.title}</h2><dl className="doc-meta mt-s"><dt>Quote #</dt><dd>{q.number}</dd><dt>Date</dt><dd>{date(q.created_at)}</dd>{q.valid_until && <><dt>Valid until</dt><dd>{date(q.valid_until)}</dd></>}</dl></div>
         </div>
         {q.intro && <div className="card-pad pre" style={{ borderBottom: '1px solid var(--border)' }}>{q.intro}</div>}
-        <div className="table-wrap"><Lines items={data.items} selectable={canAct} selected={sel} onToggle={toggle} /></div>
+        <div className="table-wrap"><Lines items={data.items} selectable={canAct} selected={sel} onToggle={toggle} doc={q} /></div>
         <div className="card-pad">
           <div className="totals">
             <div className="line"><span className="muted">Subtotal</span><b>{money(t.subtotal)}</b></div>
@@ -131,7 +133,7 @@ export function InvoiceHub() {
           <div><div className="section-title">Bill to</div><div className="strong">{client.name}</div><div className="small muted pre">{[client.address, client.email, client.phone].filter(Boolean).join('\n')}</div></div>
           <div><h2>Invoice #{inv.number}</h2><div className="mt-s"><Status s={inv.status} /></div><dl className="doc-meta mt-s"><dt>Subject</dt><dd>{inv.subject}</dd><dt>Issued</dt><dd>{date(inv.issue_date)}</dd><dt>Due</dt><dd>{date(inv.due_date)}</dd></dl></div>
         </div>
-        <div className="table-wrap"><Lines items={data.items} selected={sel} /></div>
+        <div className="table-wrap"><Lines items={data.items} selected={sel} doc={inv} /></div>
         <div className="card-pad">
           <div className="totals">
             <div className="line"><span className="muted">Subtotal</span><b>{money(totals.subtotal)}</b></div>
@@ -142,7 +144,7 @@ export function InvoiceHub() {
             <div className="line grand"><span>Balance due</span><span>{money(totals.balance)}</span></div>
           </div>
         </div>
-        {(inv.client_message || company.bank_details) && <div className="card-pad small pre" style={{ borderTop: '1px solid var(--border)' }}>{[inv.client_message, company.bank_details && `How to pay:\n${company.bank_details}\nReference: Invoice ${inv.number}`].filter(Boolean).join('\n\n')}</div>}
+        {(inv.client_message || company.bank_details || inv.terms) && <div className="card-pad small pre" style={{ borderTop: '1px solid var(--border)' }}>{[inv.client_message, company.bank_details && `How to pay:\n${company.bank_details}\nReference: Invoice ${inv.number}`, inv.terms].filter(Boolean).join('\n\n')}</div>}
       </div>
     </HubShell>
   );

@@ -94,3 +94,55 @@ test('technicians cannot see financials', async () => {
 test('unauthenticated access is rejected', async () => {
   assert.equal((await call('GET', '/clients', null, { cookie: '' })).status, 401);
 });
+
+test('pipeline follows the sales workflow automatically', async () => {
+  const c = (await call('POST', '/clients', { first_name: 'Pip', last_name: 'Line', email: 'pip@x.ie' })).body;
+  const rq = (await call('POST', '/requests', { client_id: c.id, title: 'EV charger', source: 'Google' })).body;
+  let board = (await call('GET', '/pipeline')).body;
+  let deal = board.deals.find((d) => d.request_id === rq.id);
+  assert.equal(deal.stage, 'new');
+  await call('PUT', `/requests/${rq.id}`, { assessment_start: new Date(Date.now() + 864e5).toISOString() });
+  const q = (await call('POST', '/quotes', { client_id: c.id, request_id: rq.id, title: 'EV charger', items: [{ name: 'Charger', quantity: 1, unit_price: 1000 }] })).body;
+  await call('POST', `/quotes/${q.id}/send`, {});
+  board = (await call('GET', '/pipeline')).body;
+  deal = board.deals.find((d) => d.request_id === rq.id);
+  assert.equal(deal.stage, 'quote_sent');
+  assert.equal(deal.quote_id, q.id);
+  assert.equal(deal.value, 1135);
+  assert.equal(board.deals.filter((d) => d.request_id === rq.id).length, 1, 'one deal per opportunity');
+  await call('POST', `/quotes/${q.id}/convert`);
+  deal = (await call('GET', `/deals/${deal.id}`)).body;
+  assert.equal(deal.stage, 'won');
+  assert.ok(deal.job_id);
+  // manual moves
+  const manual = (await call('POST', '/deals', { title: 'Office refit', client_id: c.id, value: 5000 })).body;
+  await call('PUT', `/deals/${manual.id}`, { stage: 'lost', lost_reason: 'Price' });
+  assert.equal((await call('GET', `/deals/${manual.id}`)).body.stage, 'lost');
+});
+
+test('payroll can be marked paid', async () => {
+  const start = new Date(); start.setUTCHours(8, 0, 0, 0);
+  const end = new Date(start.getTime() + 4 * 3600e3);
+  const e = (await call('POST', '/timesheets', { start_at: start.toISOString(), end_at: end.toISOString() })).body;
+  await call('POST', '/timesheets/approve', { ids: [e.id] });
+  const day = start.toISOString().slice(0, 10);
+  let row = (await call('GET', `/payroll?from=${day}&to=${day}`)).body.rows.find((r) => r.id === 1);
+  assert.equal(row.status, 'unpaid');
+  await call('POST', '/payroll/pay', { user_id: 1, from: day, to: day });
+  row = (await call('GET', `/payroll?from=${day}&to=${day}`)).body.rows.find((r) => r.id === 1);
+  assert.equal(row.status, 'paid');
+});
+
+test('client import and insights reports', async () => {
+  const r = (await call('POST', '/clients/import', { rows: [
+    { first_name: 'Imp', last_name: 'One', email: 'imp1@x.ie', street: '1 Rd', city: 'Galway', tags: 'landlord; EV' },
+    { first_name: 'Dup', email: 'ann@x.ie' },
+    { email: 'noname@x.ie' },
+  ] })).body;
+  assert.deepEqual(r, { created: 1, skipped: 1, duplicates: 1 });
+  const ins = (await call('GET', '/insights')).body;
+  for (const k of ['revenueBySource', 'revenueByArea', 'paymentMethods', 'quotes']) assert.ok(k in ins, k);
+  assert.ok(ins.quotes.sent_count >= 1);
+  const steps = (await call('GET', '/onboarding')).body;
+  assert.ok(steps.find((s) => s.key === 'quote').done);
+});

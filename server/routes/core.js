@@ -127,7 +127,7 @@ r.get('/search', (req, res) => {
 });
 
 // ---------------- notes (internal, any record) ----------------
-const NOTE_PARENTS = ['client', 'request', 'quote', 'job', 'invoice'];
+const NOTE_PARENTS = ['client', 'request', 'quote', 'job', 'invoice', 'deal'];
 r.get('/notes/:type/:id', (req, res) => {
   res.json(db.prepare(`SELECT n.*, u.name user_name FROM notes n LEFT JOIN users u ON u.id = n.user_id
     WHERE parent_type = ? AND parent_id = ? ORDER BY n.created_at DESC`).all(req.params.type, req.params.id));

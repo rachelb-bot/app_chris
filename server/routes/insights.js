@@ -49,6 +49,7 @@ r.get('/dashboard', (req, res) => {
     out.todo = {
       new_requests: db.prepare("SELECT COUNT(*) c FROM requests WHERE status = 'new'").get().c,
       assessments_today: db.prepare("SELECT COUNT(*) c FROM requests WHERE substr(assessment_start,1,10) = ? AND status != 'archived'").get(d).c,
+      assessments_overdue: db.prepare("SELECT COUNT(*) c FROM requests WHERE status = 'assessment' AND COALESCE(assessment_end, assessment_start) < ?").get(now).c,
       quotes_approved: db.prepare("SELECT COUNT(*) c FROM quotes WHERE status = 'approved'").get().c,
       quotes_changes: db.prepare("SELECT COUNT(*) c FROM quotes WHERE status = 'changes_requested'").get().c,
       quotes_draft: db.prepare("SELECT COUNT(*) c FROM quotes WHERE status = 'draft'").get().c,
@@ -159,7 +160,30 @@ r.get('/insights', office, (req, res) => {
   // lead sources
   const sources = db.prepare(`SELECT COALESCE(NULLIF(lead_source,''),'Unknown') source, COUNT(*) c FROM clients WHERE created_at >= ? GROUP BY 1 ORDER BY c DESC`).all(since90);
 
-  res.json({ from, to, overview, revenue, pl, cashflow, conversion, jobs: jobsSection, sources });
+  // revenue (payments received in range) by lead source, by area and by payment method
+  const paid = db.prepare(`SELECT p.amount, p.method, c.lead_source,
+      COALESCE(ip.city, (SELECT city FROM properties WHERE client_id = c.id ORDER BY id LIMIT 1)) city
+    FROM payments p JOIN invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id
+    LEFT JOIN properties ip ON ip.id = i.property_id
+    WHERE p.paid_on >= ? AND p.paid_on <= ?`).all(from, to);
+  const group = (key, fallback) => Object.entries(paid.reduce((acc, x) => { const k = (x[key] || '').trim() || fallback; acc[k] = (acc[k] || 0) + x.amount; return acc; }, {}))
+    .map(([label, value]) => ({ label, value: round2(value) })).sort((a, b) => b.value - a.value);
+  const METHOD = { bank_transfer: 'Bank transfer', card: 'Card', cash: 'Cash', cheque: 'Cheque', other: 'Other' };
+  const revenueBySource = group('lead_source', 'Unknown');
+  const revenueByArea = group('city', 'No address').slice(0, 12);
+  const paymentMethods = group('method', 'other').map((m) => ({ ...m, label: METHOD[m.label] || m.label }));
+
+  // quote performance: quotes sent in range, and how many of those were won
+  const sent = db.prepare(`SELECT * FROM quotes WHERE sent_at IS NOT NULL AND ${range('sent_at')}`).all()
+    .map((q) => ({ ...q, total: computeTotals(getLineItems('quote', q.id), q).total }));
+  const won = sent.filter((q) => ['approved', 'converted'].includes(q.status));
+  const quotes = {
+    sent_count: sent.length, sent_value: round2(sent.reduce((a, q) => a + q.total, 0)),
+    won_count: won.length, won_value: round2(won.reduce((a, q) => a + q.total, 0)),
+    conversion_rate: sent.length ? Math.round((won.length / sent.length) * 100) : null,
+  };
+
+  res.json({ from, to, overview, revenue, pl, cashflow, conversion, jobs: jobsSection, sources, revenueBySource, revenueByArea, paymentMethods, quotes });
 });
 
 // ======================= MARKETING =======================

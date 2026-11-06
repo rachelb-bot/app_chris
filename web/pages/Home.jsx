@@ -1,9 +1,9 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Inbox, FileText, Wrench, Receipt, ChevronRight, MapPin, CalendarDays, CheckCircle2 } from 'lucide-react';
+import { Inbox, FileText, Wrench, Receipt, ChevronRight, MapPin, CalendarDays, CheckCircle2, Circle } from 'lucide-react';
 import { api } from '../api.js';
 import { money, time, date, ymd } from '../format.js';
-import { useApp, useLoad, isOffice, Loading, Status, Avatars, Empty, useAction } from '../components/ui.jsx';
+import { useApp, useLoad, isOffice, Loading, Status, Avatars, Empty, useAction, Seg } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
 import { Activity } from '../components/shared.jsx';
 
@@ -12,6 +12,7 @@ function greeting() { const h = new Date().getHours(); return h < 12 ? 'Good mor
 export default function Home() {
   const { user } = useApp();
   const { data, reload } = useLoad(`/dashboard?date=${ymd()}`);
+  const [tab, setTab] = React.useState('dashboard');
   const nav = useNavigate();
   const [run] = useAction();
   if (!data) return <Loading />;
@@ -24,6 +25,9 @@ export default function Home() {
     <div>
       <PageHead title={`${greeting()}, ${user.name.split(' ')[0]}`} sub={date(new Date(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} />
 
+      {office && <div className="mb"><Seg value={tab} onChange={setTab} options={[['first', 'First steps'], ['dashboard', 'Dashboard']]} /></div>}
+      {office && tab === 'first' && <FirstSteps />}
+      {(!office || tab === 'dashboard') && (<>
       {office && (
         <div className="card mb">
           <div className="workflow">
@@ -32,6 +36,7 @@ export default function Home() {
               <Link to="/requests?status=new"><span>New</span><b>{wf(data.workflow.requests, 'new')}</b></Link>
               <Link to="/requests?status=assessment"><span>Assessments scheduled</span><b>{wf(data.workflow.requests, 'assessment')}</b></Link>
               <Link to="/requests"><span>Assessments today</span><b>{t.assessments_today}</b></Link>
+              <Link to="/requests?status=assessment"><span>Overdue assessments</span><b style={{ color: t.assessments_overdue ? 'var(--red)' : undefined }}>{t.assessments_overdue}</b></Link>
             </div>
             <div>
               <h4><FileText size={17} /> Quotes</h4>
@@ -114,6 +119,28 @@ export default function Home() {
           </div>
         )}
       </div>
+      </>)}
+    </div>
+  );
+}
+
+function FirstSteps() {
+  const { data } = useLoad('/onboarding');
+  if (!data) return <Loading />;
+  const done = data.filter((x) => x.done).length;
+  return (
+    <div className="card">
+      <div className="card-head"><div><h2>Get set up</h2><div className="small muted">{done} of {data.length} done</div></div>
+        <div style={{ width: 200, height: 8, background: 'var(--surface-2)', borderRadius: 99, overflow: 'hidden' }}><div style={{ width: `${(done / data.length) * 100}%`, height: '100%', background: 'var(--green)' }} /></div></div>
+      <ul className="list-plain" style={{ padding: '0 20px' }}>
+        {data.map((x) => (
+          <li key={x.key} className="row">
+            {x.done ? <CheckCircle2 size={20} color="var(--green)" /> : <Circle size={20} className="faint" />}
+            <span style={{ flex: 1, textDecoration: x.done ? 'line-through' : 'none', color: x.done ? 'var(--faint)' : undefined }}>{x.label}</span>
+            {!x.done && <Link className="btn sm" to={x.url}>Start</Link>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

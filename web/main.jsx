@@ -18,6 +18,7 @@ import Expenses from './pages/Expenses.jsx';
 import Timesheets from './pages/Timesheets.jsx';
 import Insights from './pages/Insights.jsx';
 import Marketing from './pages/Marketing.jsx';
+import Pipeline from './pages/Pipeline.jsx';
 import SettingsPage from './pages/Settings.jsx';
 import { QuoteHub, InvoiceHub, BookingHub } from './hub/Hub.jsx';
 
@@ -85,6 +86,7 @@ function AppRoutes() {
           <Route path="/timesheets" element={<Timesheets />} />
           <Route path="/insights" element={guard(<Insights />)} />
           <Route path="/marketing" element={guard(<Marketing />)} />
+          <Route path="/pipeline" element={guard(<Pipeline />)} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/:tab" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

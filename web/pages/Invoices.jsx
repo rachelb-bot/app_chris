@@ -5,7 +5,7 @@ import { api, qs } from '../api.js';
 import { money, date, ymd, IS_DEMO } from '../format.js';
 import { useLoad, useAction, Loading, ErrorBox, Status, Empty, Field, Dropdown, Chips, Confirm, Modal, useDebounced, useToast, useApp, isAdmin, askConfirm } from '../components/ui.jsx';
 import { PageHead } from '../components/Layout.jsx';
-import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient } from '../components/shared.jsx';
+import { ClientPicker, PropertySelect, LineItemsEditor, TotalsEditor, Notes, Attachments, DocLines, useClient, ClientViewOptions } from '../components/shared.jsx';
 import { SendModal, DocHeader } from './Quotes.jsx';
 
 export function InvoicesList() {
@@ -59,7 +59,7 @@ export function InvoiceForm() {
     else {
       const issue = ymd();
       const due = ymd(new Date(Date.now() + (Number(settings.invoice_terms_days) || 14) * 864e5));
-      setF({ client_id: Number(params.get('client_id')) || null, property_id: null, subject: 'For services rendered', issue_date: issue, due_date: due, items: [], discount: 0, tax_rate: Number(settings.tax_rate) || 0, client_message: settings.invoice_message, notes: '' });
+      setF({ client_id: Number(params.get('client_id')) || null, property_id: null, subject: 'For services rendered', issue_date: issue, due_date: due, items: [], discount: 0, tax_rate: Number(settings.tax_rate) || 0, client_message: settings.invoice_message, terms: settings.invoice_terms, notes: '', show_quantities: 1, show_unit_prices: 1, show_line_totals: 1 });
     }
   }, [id]);
   const { data: client } = useClient(f?.client_id);
@@ -95,6 +95,8 @@ export function InvoiceForm() {
         <div className="card card-pad">
           <div className="form-grid">
             <Field label="Client message (shown on invoice)" full><textarea value={f.client_message || ''} onChange={set('client_message')} /></Field>
+            <Field label="Contract / disclaimer" full><textarea rows={3} value={f.terms || ''} onChange={set('terms')} /></Field>
+            <ClientViewOptions value={f} onChange={(p) => setF({ ...f, ...p })} />
             <Field label="Internal notes (not shown to client)" full><textarea value={f.notes || ''} onChange={set('notes')} placeholder="Leave an internal note for yourself or a team member" /></Field>
           </div>
         </div>
@@ -167,7 +169,7 @@ export function InvoiceDetail() {
               <TotalsEditor items={inv.items} discount={inv.discount} tax_rate={inv.tax_rate} readOnly />
               <div className="totals"><div className="line"><span className="muted">Paid</span><span>−{money(inv.totals.paid)}</span></div><div className="line grand"><span>Balance due</span><span>{money(inv.totals.balance)}</span></div></div>
             </div>
-            {inv.client_message && <div className="card-pad small muted pre" style={{ borderTop: '1px solid var(--border)' }}>{inv.client_message}{settings.bank_details && `\n\n${settings.bank_details}`}</div>}
+            {(inv.client_message || inv.terms) && <div className="card-pad small muted pre" style={{ borderTop: '1px solid var(--border)' }}>{[inv.client_message, settings.bank_details, inv.terms].filter(Boolean).join('\n\n')}</div>}
           </div>
           <Attachments type="invoice" id={inv.id} />
         </div>

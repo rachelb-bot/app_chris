@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db, getSettings, logActivity } from '../db.js';
 import { bad, notFound, insert, update, nowIso, getLineItems, computeTotals, formatAddress, clientName, invoiceTotals, invoiceDisplayStatus } from '../lib.js';
 import { promoteLead } from './crm.js';
+import { syncDeal, quoteValue } from './pipeline.js';
 import { sendEmail } from '../mailer.js';
 
 /** Public client hub: no login, access by unguessable token only. */
@@ -31,7 +32,8 @@ r.get('/hub/quote/:token', (req, res) => {
   res.json({
     company: company(), client: clientInfo(q.client_id, q.property_id),
     quote: { number: q.number, title: q.title, intro: q.intro, status: q.status, created_at: q.created_at, valid_until: q.valid_until, terms: q.terms,
-      client_message: q.client_message, deposit: q.deposit, discount: q.discount, tax_rate: q.tax_rate, approved_at: q.approved_at, client_signature: q.client_signature },
+      client_message: q.client_message, deposit: q.deposit, discount: q.discount, tax_rate: q.tax_rate, approved_at: q.approved_at, client_signature: q.client_signature,
+      show_quantities: q.show_quantities, show_unit_prices: q.show_unit_prices, show_line_totals: q.show_line_totals },
     items: publicItems(items), totals: computeTotals(items, q),
   });
 });
@@ -46,6 +48,7 @@ r.post('/hub/quote/:token/approve', (req, res) => {
     for (const it of getLineItems('quote', q.id)) if (it.optional) update('line_items', it.id, { selected: selected.has(it.id) ? 1 : 0 });
     update('quotes', q.id, { status: 'approved', approved_at: nowIso(), client_signature: signature });
     promoteLead(q.client_id);
+    syncDeal({ clientId: q.client_id, quoteId: q.id, requestId: q.request_id, stage: 'won', value: quoteValue(q.id), title: q.title });
     logActivity({ entityType: 'quote', entityId: q.id, clientId: q.client_id, action: 'approved', summary: `Quote #${q.number} approved online by ${signature}` });
   })();
   const s = getSettings();
@@ -59,6 +62,7 @@ r.post('/hub/quote/:token/changes', (req, res) => {
   if (!msg) throw bad('Tell us what you would like changed');
   db.transaction(() => {
     update('quotes', q.id, { status: 'changes_requested', client_feedback: msg });
+    syncDeal({ clientId: q.client_id, quoteId: q.id, requestId: q.request_id, stage: 'follow_up', title: q.title });
     insert('notes', { parent_type: 'quote', parent_id: q.id, body: `Client requested changes: ${msg}` });
     logActivity({ entityType: 'quote', entityId: q.id, clientId: q.client_id, action: 'changes_requested', summary: `Client requested changes on quote #${q.number}` });
   })();
@@ -73,7 +77,8 @@ r.get('/hub/invoice/:token', (req, res) => {
   res.json({
     company: company(), client: clientInfo(inv.client_id, inv.property_id),
     invoice: { number: inv.number, subject: inv.subject, issue_date: inv.issue_date, due_date: inv.due_date, client_message: inv.client_message,
-      discount: inv.discount, tax_rate: inv.tax_rate, status: invoiceDisplayStatus(inv, totals) },
+      discount: inv.discount, tax_rate: inv.tax_rate, status: invoiceDisplayStatus(inv, totals), terms: inv.terms,
+      show_quantities: inv.show_quantities, show_unit_prices: inv.show_unit_prices, show_line_totals: inv.show_line_totals },
     items: publicItems(items), totals,
     payments: db.prepare('SELECT amount, method, paid_on FROM payments WHERE invoice_id = ? ORDER BY paid_on').all(inv.id),
   });
@@ -91,7 +96,9 @@ r.post('/hub/booking', (req, res) => {
     const cid = client ? client.id : insert('clients', { first_name: b.first_name, last_name: b.last_name || null, email: b.email || null, phone: b.phone || null, status: 'lead', lead_source: 'Online booking' });
     let pid = null;
     if (b.street || b.city) pid = insert('properties', { client_id: cid, street: b.street || null, city: b.city || null, postcode: b.postcode || null });
-    const rid = insert('requests', { client_id: cid, property_id: pid, title: String(b.service || 'Online request').slice(0, 120), details: `${b.details}${b.preferred ? `\n\nPreferred time: ${b.preferred}` : ''}`, source: 'Online booking' });
+    const title = String(b.service || 'Online request').slice(0, 120);
+    const rid = insert('requests', { client_id: cid, property_id: pid, title, details: `${b.details}${b.preferred ? `\n\nPreferred time: ${b.preferred}` : ''}`, source: 'Online booking', requested_on: new Date().toISOString().slice(0, 10) });
+    syncDeal({ clientId: cid, requestId: rid, stage: 'new', title, source: 'Online booking' });
     logActivity({ entityType: 'request', entityId: rid, clientId: cid, action: 'created', summary: `New online request from ${b.first_name}` });
   })();
   const s = getSettings();

@@ -12,8 +12,10 @@ import work from './routes/work.js';
 import money from './routes/money.js';
 import insights from './routes/insights.js';
 import hub from './routes/hub.js';
+import pipeline, { backfillDeals } from './routes/pipeline.js';
 
 migrate();
+backfillDeals();
 
 export const app = express();
 app.set('trust proxy', 1);
@@ -34,7 +36,7 @@ app.get('/healthz', (_req, res) => {
 
 // Public client hub routes first (no login), then authenticated API.
 app.use('/api', hub);
-app.use('/api', loadUser, core, crm, work, money, insights);
+app.use('/api', loadUser, core, crm, work, money, insights, pipeline);
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Serve the built web app (single-page app with client-side routing).
